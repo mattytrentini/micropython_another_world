@@ -183,18 +183,19 @@ class PolygonRenderer:
             if remaining == 0:
                 break
 
-            # Calculate steps for left and right edges (int32_t in C)
-            # Left edge: from points[j+1] to points[j]
+            # Calculate steps for left and right edges (int32_t in C).
+            # In the C reference, calcStep always computes the step, even
+            # when dy=0 (using _interpTable[0]=0x4000). This produces a
+            # large step that snaps the edge to its target position.
+            # The second calcStep overwrites h, so h = dy2.
             dy1 = py[j] - py[j + 1]
-            if dy1 > 0 and dy1 < 0x400:
+            if dy1 >= 0 and dy1 < 0x400:
                 step1 = _to_i32((px[j] - px[j + 1]) * _interp_table[dy1] * 4)
             else:
                 step1 = 0
-                dy1 = 0
 
-            # Right edge: from points[i-1] to points[i]
             dy2 = py[i] - py[i - 1]
-            if dy2 > 0 and dy2 < 0x400:
+            if dy2 >= 0 and dy2 < 0x400:
                 step2 = _to_i32((px[i] - px[i - 1]) * _interp_table[dy2] * 4)
             else:
                 step2 = 0
@@ -207,8 +208,8 @@ class PolygonRenderer:
             cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF
             cpt2 = (cpt2 & 0xFFFF0000) | 0x8000
 
-            # Use max of dy1, dy2 as the number of scanlines
-            h = max(dy1, dy2)
+            # h = dy2 (right edge), matching C where second calcStep overwrites h
+            h = dy2
 
             if h == 0:
                 cpt1 = _to_u32(cpt1 + step1)
