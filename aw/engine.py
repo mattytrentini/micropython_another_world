@@ -39,8 +39,9 @@ class Engine:
         self.video.font_data = FONT
         self.video.strings = STRINGS
 
-        # Display callback
+        # Display callback — defers actual presentation to end of frame
         self.video.on_display = self._on_display
+        self._display_pending = False
 
         self._quit = False
         self._last_timestamp = 0
@@ -88,8 +89,13 @@ class Engine:
             self.vm.set_code(self.resource.seg_code)
 
         # Run VM
+        self._display_pending = False
         self.vm.setup_tasks()
         self.vm.run_tasks()
+
+        # Present the last display update from this frame (if any)
+        if self._display_pending:
+            self._present()
 
         # Frame timing
         pause_slices = self.vm.regs[VAR_PAUSE_SLICES]
@@ -105,7 +111,17 @@ class Engine:
         self._last_timestamp = self.timer.ticks_ms()
 
     def _on_display(self, framebuf_4bpp, palette_rgb):
-        """Called by video.update_display to present a frame."""
+        """Called by video.update_display — defers to end of frame.
+
+        Multiple updateDisplay calls can happen per VM frame (e.g. during
+        initialization). We only present the last one to avoid showing
+        intermediate compositing states.
+        """
         if palette_rgb:
             self.display.update_palette(palette_rgb)
-        self.display.present(framebuf_4bpp)
+        self._display_pending = True
+
+    def _present(self):
+        """Actually push the current display page to the terminal."""
+        display_buf = self.video.page_bufs[self.video.buffers[1]]
+        self.display.present(display_buf)

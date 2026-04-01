@@ -24,6 +24,20 @@ _interp_table = [0x4000] + [0x4000 // i for i in range(1, 0x400)]
 # Max vertices per polygon
 MAX_POINTS = 50
 
+# 32-bit integer masks (the C reference uses uint32_t/int32_t)
+_U32_MASK = 0xFFFFFFFF
+
+
+def _to_i32(val):
+    """Wrap to signed 32-bit integer (matching C int32_t overflow)."""
+    val &= _U32_MASK
+    return val - 0x100000000 if val >= 0x80000000 else val
+
+
+def _to_u32(val):
+    """Wrap to unsigned 32-bit integer."""
+    return val & _U32_MASK
+
 
 class PolygonRenderer:
     """Renders polygons into the video framebuffers."""
@@ -156,9 +170,9 @@ class PolygonRenderer:
         i += 1
         j -= 1
 
-        # Fixed-point accumulators (16.16)
-        cpt1 = lx << 16
-        cpt2 = rx << 16
+        # Fixed-point accumulators (16.16) — must wrap as uint32_t
+        cpt1 = _to_u32(lx << 16)
+        cpt2 = _to_u32(rx << 16)
 
         remaining = num_points
         draw_buf = self.video.get_draw_buf()
@@ -169,11 +183,11 @@ class PolygonRenderer:
             if remaining == 0:
                 break
 
-            # Calculate steps for left and right edges
+            # Calculate steps for left and right edges (int32_t in C)
             # Left edge: from points[j+1] to points[j]
             dy1 = py[j] - py[j + 1]
             if dy1 > 0 and dy1 < 0x400:
-                step1 = (px[j] - px[j + 1]) * _interp_table[dy1] * 4
+                step1 = _to_i32((px[j] - px[j + 1]) * _interp_table[dy1] * 4)
             else:
                 step1 = 0
                 dy1 = 0
@@ -181,7 +195,7 @@ class PolygonRenderer:
             # Right edge: from points[i-1] to points[i]
             dy2 = py[i] - py[i - 1]
             if dy2 > 0 and dy2 < 0x400:
-                step2 = (px[i] - px[i - 1]) * _interp_table[dy2] * 4
+                step2 = _to_i32((px[i] - px[i - 1]) * _interp_table[dy2] * 4)
             else:
                 step2 = 0
                 dy2 = 0
@@ -189,7 +203,7 @@ class PolygonRenderer:
             i += 1
             j -= 1
 
-            # Reset fractional parts
+            # Reset fractional parts (uint32_t masking)
             cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF
             cpt2 = (cpt2 & 0xFFFF0000) | 0x8000
 
@@ -197,19 +211,20 @@ class PolygonRenderer:
             h = max(dy1, dy2)
 
             if h == 0:
-                cpt1 += step1
-                cpt2 += step2
+                cpt1 = _to_u32(cpt1 + step1)
+                cpt2 = _to_u32(cpt2 + step2)
             else:
                 for _ in range(h):
                     if hline_y >= 0:
-                        lx_int = _asr16(cpt1)
-                        rx_int = _asr16(cpt2)
+                        # Extract integer part as signed (arithmetic shift right 16)
+                        lx_int = _to_i32(cpt1) >> 16
+                        rx_int = _to_i32(cpt2) >> 16
                         if lx_int <= 319 and rx_int >= 0:
                             lx_clamp = max(lx_int, 0)
                             rx_clamp = min(rx_int, 319)
                             draw_fn(draw_buf, page0_buf, lx_clamp, rx_clamp, hline_y, color)
-                    cpt1 += step1
-                    cpt2 += step2
+                    cpt1 = _to_u32(cpt1 + step1)
+                    cpt2 = _to_u32(cpt2 + step2)
                     hline_y += 1
                     if hline_y > 199:
                         return
@@ -326,17 +341,3 @@ class PolygonRenderer:
             buf[p] = (buf[p] & cmaske) | 0x80
 
 
-def _asr16(val):
-    """Arithmetic shift right by 16 (extract integer part of 16.16 fixed-point).
-
-    Handles signed values correctly.
-    """
-    # In Python, >> on negative ints does arithmetic shift
-    if val >= 0:
-        return val >> 16
-    else:
-        # For negative values, we need to handle 32-bit signed arithmetic
-        # val is a Python int that may be large; treat as signed 32-bit
-        if val & 0x80000000:
-            return -((~val + 1) >> 16)
-        return val >> 16
