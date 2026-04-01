@@ -37,12 +37,19 @@ except ImportError:
 
 
 class UnixInput(InputHAL):
-    """Non-blocking keyboard input from terminal."""
+    """Non-blocking keyboard input from terminal.
+
+    Terminal key repeats have gaps between events. To simulate held keys,
+    each key stays "pressed" for HOLD_FRAMES frames after the last event.
+    """
+
+    HOLD_FRAMES = 3  # frames to keep a key held after last repeat
 
     def __init__(self):
         self._old_settings = None
-        self._keys = set()
         self._tty_ok = False
+        # Map key name -> frames remaining until release
+        self._held = {}
         if _HAS_TERMIOS:
             try:
                 self._old_settings = termios.tcgetattr(sys.stdin.fileno())
@@ -55,17 +62,31 @@ class UnixInput(InputHAL):
         state = InputState()
         self._read_keys()
 
-        state.left = "left" in self._keys
-        state.right = "right" in self._keys
-        state.up = "up" in self._keys
-        state.down = "down" in self._keys
-        state.action = "action" in self._keys
-        state.quit = "quit" in self._keys
-        state.pause = "pause" in self._keys
-        state.step = "step" in self._keys
+        # Decay held keys
+        expired = []
+        for key, frames in self._held.items():
+            if frames <= 0:
+                expired.append(key)
+            else:
+                self._held[key] = frames - 1
+        for key in expired:
+            del self._held[key]
 
-        self._keys.clear()
+        state.left = "left" in self._held
+        state.right = "right" in self._held
+        state.up = "up" in self._held
+        state.down = "down" in self._held
+        state.action = "action" in self._held
+        state.quit = self._held.pop("quit", 0) > 0
+        # Pause and step are edge-triggered (one-shot, not held)
+        state.pause = self._held.pop("pause", 0) > 0
+        state.step = self._held.pop("step", 0) > 0
+
         return state
+
+    def _press(self, key):
+        """Register a key press, resetting its hold timer."""
+        self._held[key] = self.HOLD_FRAMES
 
     def _stdin_ready(self):
         """Check if stdin has data available (non-blocking)."""
@@ -98,31 +119,31 @@ class UnixInput(InputHAL):
                     if len(seq) >= 2 and seq[0:1] == b'[' and b.isalpha():
                         break
                 if seq == b'[A':
-                    self._keys.add("up")
+                    self._press("up")
                 elif seq == b'[B':
-                    self._keys.add("down")
+                    self._press("down")
                 elif seq == b'[C' or seq.endswith(b'C'):
-                    self._keys.add("right")  # including Ctrl/Shift+Right
+                    self._press("right")  # including Ctrl/Shift+Right
                 elif seq == b'[D' or seq.endswith(b'D'):
-                    self._keys.add("left")   # including Ctrl/Shift+Left
+                    self._press("left")   # including Ctrl/Shift+Left
                 elif seq == b'':
-                    self._keys.add("quit")  # bare Escape (no following bytes)
+                    self._press("quit")  # bare Escape (no following bytes)
             elif ch == b' ' or ch == b'\r' or ch == b'\n':
-                self._keys.add("action")
+                self._press("action")
             elif ch == b'q' or ch == b'\x03':  # q or Ctrl-C
-                self._keys.add("quit")
+                self._press("quit")
             elif ch == b'w' or ch == b'k':
-                self._keys.add("up")
+                self._press("up")
             elif ch == b's' or ch == b'j':
-                self._keys.add("down")
+                self._press("down")
             elif ch == b'a' or ch == b'h':
-                self._keys.add("left")
+                self._press("left")
             elif ch == b'd' or ch == b'l':
-                self._keys.add("right")
+                self._press("right")
             elif ch == b'p':
-                self._keys.add("pause")
+                self._press("pause")
             elif ch == b'n':
-                self._keys.add("step")
+                self._press("step")
 
     def shutdown(self):
         """Restore terminal settings."""
