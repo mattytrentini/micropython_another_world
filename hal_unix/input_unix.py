@@ -39,11 +39,13 @@ except ImportError:
 class UnixInput(InputHAL):
     """Non-blocking keyboard input from terminal.
 
-    Terminal key repeats have gaps between events. To simulate held keys,
-    each key stays "pressed" for HOLD_FRAMES frames after the last event.
+    Terminals only send key-down events (no key-up). When holding a key,
+    there's an initial delay (~300-500ms) before repeats start. To simulate
+    held keys, each key stays "pressed" for HOLD_FRAMES frames after the
+    last event — long enough to bridge the initial repeat delay.
     """
 
-    HOLD_FRAMES = 3  # frames to keep a key held after last repeat
+    HOLD_FRAMES = 25  # ~500ms at 50Hz, covers typical repeat delay
 
     def __init__(self):
         self._old_settings = None
