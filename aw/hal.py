@@ -7,7 +7,7 @@ Implementations are in hal_unix/, hal_rp2/, hal_esp32/, etc.
 
 class InputState:
     """Input state snapshot returned by InputHAL.poll()."""
-    __slots__ = ("left", "right", "up", "down", "action", "quit")
+    __slots__ = ("left", "right", "up", "down", "action", "quit", "pause", "step")
 
     def __init__(self):
         self.left = False
@@ -16,6 +16,8 @@ class InputState:
         self.down = False
         self.action = False
         self.quit = False
+        self.pause = False  # toggle pause (debug)
+        self.step = False   # advance one frame while paused (debug)
 
 
 class DisplayHAL:

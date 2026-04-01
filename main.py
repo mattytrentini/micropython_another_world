@@ -1,34 +1,41 @@
 """Another World - MicroPython game engine entry point.
 
 Usage:
-    python3 main.py <data_dir> [part_id]
-    micropython main.py <data_dir> [part_id]
+    python3 main.py <data_dir> [part_id] [--debug]
+    micropython main.py <data_dir> [part_id] [--debug]
 
 Arguments:
-    data_dir: path to directory containing game data files
-              (memlist.bin, bank01-bank0d)
-    part_id:  optional starting part (default: 16001 = intro)
-              16000=copy protection, 16001=intro, 16002=water, etc.
+    data_dir:  path to directory containing game data files
+    part_id:   optional starting part (default: 16001 = intro)
+               16000=protection, 16001=intro, 16002=water, etc.
+    --debug:  enable debug mode (frame counter, pause/step)
 
 Controls:
     Arrow keys or WASD: movement
     Space/Enter: action
     Q or Ctrl-C: quit
+    P: pause/unpause (debug mode)
+    N: step one frame while paused (debug mode)
 """
 
 import sys
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: {} <data_dir> [part_id]".format(sys.argv[0]))
-        print("\ndata_dir: path to game data files (memlist.bin, bank01-bank0d)")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+
+    if len(args) < 1:
+        print("Usage: {} <data_dir> [part_id] [--debug]".format(sys.argv[0]))
+        print("\ndata_dir: path to game data files")
         print("part_id:  starting part (default 16001)")
         print("          16000=protection, 16001=intro, 16002=water")
+        print("--debug: frame counter, P to pause, N to step")
         sys.exit(1)
 
-    data_dir = sys.argv[1]
-    part_id = int(sys.argv[2]) if len(sys.argv) > 2 else 16001
+    data_dir = args[0]
+    part_id = int(args[1]) if len(args) > 1 else 16001
+    debug = "--debug" in flags
 
     # Import after arg check so errors are clearer
     from aw.engine import Engine
@@ -37,12 +44,13 @@ def main():
     from hal_unix.timer_unix import UnixTimer
     from hal_unix.file_unix import UnixFile
 
-    display = TerminalDisplay(scale=2)  # 160 columns
+    display = TerminalDisplay(scale=2, show_frame=debug)
     inp = UnixInput()
     timer = UnixTimer()
     file_hal = UnixFile(data_dir)
 
     engine = Engine(display, inp, timer, file_hal)
+    engine.debug = debug
 
     try:
         engine.init(start_part=part_id)

@@ -52,6 +52,8 @@ class UnixInput(InputHAL):
         state.down = "down" in self._keys
         state.action = "action" in self._keys
         state.quit = "quit" in self._keys
+        state.pause = "pause" in self._keys
+        state.step = "step" in self._keys
 
         self._keys.clear()
         return state
@@ -95,6 +97,10 @@ class UnixInput(InputHAL):
                 self._keys.add("left")
             elif ch == b'd' or ch == b'l':
                 self._keys.add("right")
+            elif ch == b'p':
+                self._keys.add("pause")
+            elif ch == b'n':
+                self._keys.add("step")
 
     def shutdown(self):
         """Restore terminal settings."""

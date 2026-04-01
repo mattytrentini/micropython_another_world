@@ -45,14 +45,18 @@ _FD = 1
 class TerminalDisplay(DisplayHAL):
     """Renders 4bpp framebuffer to terminal using ANSI true-color and half-blocks."""
 
-    def __init__(self, scale=2):
+    def __init__(self, scale=2, show_frame=False):
         """
         Args:
             scale: horizontal pixel grouping. scale=2 means every 2 horizontal
                    pixels are merged into one character cell, giving 160 columns.
                    scale=4 gives 80 columns.
+            show_frame: if True, display frame counter below the image.
         """
         self.scale = scale
+        self.show_frame = show_frame
+        self.paused = False
+        self._frame_num = 0
         self._cols = SCREEN_W // scale
         self._rows = SCREEN_H // 2  # half-block = 2 vertical pixels per cell
         # Pre-computed fg/bg escape strings per palette color (set in update_palette)
@@ -125,6 +129,12 @@ class TerminalDisplay(DisplayHAL):
             parts.append("\n")
             prev_fg_idx = -1
             prev_bg_idx = -1
+
+        if self.show_frame:
+            self._frame_num += 1
+            status = " PAUSED (N=step)" if self.paused else ""
+            parts.append("\x1b[37mFrame {:d}{}\x1b[0m\x1b[K\n".format(
+                self._frame_num, status))
 
         parts.append(_SYNC_END)
 

@@ -44,6 +44,8 @@ class Engine:
         self._display_pending = False
 
         self._quit = False
+        self._paused = False
+        self.debug = False
         self._last_timestamp = 0
 
     def init(self, start_part=PART_INTRO):
@@ -81,6 +83,18 @@ class Engine:
         if input_state.quit:
             self._quit = True
             return
+
+        # Debug: pause/step handling
+        if self.debug:
+            if input_state.pause:
+                self._paused = not self._paused
+                self.display.paused = self._paused
+                if self._paused:
+                    self._present()  # redraw with PAUSED indicator
+            if self._paused and not input_state.step:
+                self.timer.sleep_ms(50)
+                return
+
         self.vm.update_input(input_state)
 
         # Check if a new part needs to be loaded
