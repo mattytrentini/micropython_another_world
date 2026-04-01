@@ -140,7 +140,8 @@ class VM:
 
         Re-reads seg_code before each thread, matching the C reference
         where _scriptPtr.pc = res->segBytecode + n. This is needed
-        because op_updateResources can change the code segment mid-frame.
+        because op_updateResources can change the code segment between
+        threads within the same frame.
         """
         for i in range(NUM_THREADS):
             if self.task_state[0][i] != STATE_ACTIVE:
@@ -150,8 +151,11 @@ class VM:
             if pc == THREAD_INACTIVE:
                 continue
 
-            # Re-read code segment (may have changed via op_updateResources)
-            if self.resource and self.resource.seg_code:
+            # Re-read code segment from resource. Note: if a thread calls
+            # op_updateResources, the code changes but the CURRENT thread
+            # keeps its old _code reference (via the local in _execute).
+            # The new code takes effect for subsequent threads/frames.
+            if self.resource and self.resource.seg_code is not None:
                 self._code = memoryview(self.resource.seg_code)
 
             self._pc = pc
@@ -163,16 +167,20 @@ class VM:
             self.task_pc[0][i] = self._pc & 0xFFFF
 
     def _execute(self):
-        """Execute bytecode for the current thread until paused."""
-        code = self._code
+        """Execute bytecode for the current thread until paused.
+
+        Uses self._code throughout (not a local cache) so that all
+        fetch operations see the same code buffer. The code buffer
+        is only updated between threads in run_tasks(), never mid-thread.
+        """
         while not self._paused:
-            op = code[self._pc]
+            op = self._code[self._pc]
             self._pc += 1
 
             if op & 0x80:
-                self._draw_poly_simple(op, code)
+                self._draw_poly_simple(op)
             elif op & 0x40:
-                self._draw_poly_complex(op, code)
+                self._draw_poly_complex(op)
             elif op <= 0x1A:
                 self._optable[op]()
             else:
@@ -430,7 +438,7 @@ class VM:
 
     # --- Polygon draw pseudo-opcodes ---
 
-    def _draw_poly_simple(self, op, code):
+    def _draw_poly_simple(self, op):
         """Handle 0x80 prefix: simple cinematic polygon draw.
 
         Encoding: opcode byte has bit 7 set.
@@ -449,7 +457,7 @@ class VM:
         if self.video:
             self.video.draw_shape_at(off, x, y, 0xFF, 64, False)
 
-    def _draw_poly_complex(self, op, code):
+    def _draw_poly_complex(self, op):
         """Handle 0x40 prefix: complex polygon draw with variable parameters.
 
         Bits 5-0 of the opcode encode how x, y, zoom are sourced.
