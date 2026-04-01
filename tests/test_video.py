@@ -260,16 +260,15 @@ def test_vm_copy_page():
 
 
 def test_vm_update_display():
-    """VM updateDisplay swaps pages and yields."""
+    """VM updateDisplay swaps pages and continues (no yield)."""
     vm, video = make_integrated_vm([
         0x00, 0x10, 0x00, 0x01,  # movConst var[0x10] = 1
         0x10, 0xFF,               # updateDisplay 0xFF (swap)
-        0x00, 0x20, 0x00, 0x02,  # movConst var[0x20] = 2 (next frame)
-        0x06,
+        0x00, 0x20, 0x00, 0x02,  # movConst var[0x20] = 2
     ])
     vm.run_tasks()
     assert vm.regs[0x10] == 1
-    assert vm.regs[0x20] == 0  # updateDisplay yields
+    assert vm.regs[0x20] == 2  # updateDisplay does NOT yield
     assert video.buffers[1] == 2  # swapped
     assert video.buffers[2] == 1
 

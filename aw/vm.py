@@ -95,16 +95,17 @@ class VM:
         # Initialize random seed
         self.regs[VAR_RANDOM_SEED] = 0x1234  # deterministic seed
 
-        # Deactivate all threads
+        # Initialize all threads: active state but no PC (matching reference).
+        # Threads are "active" by default; only the PC (0xFFFF = inactive)
+        # determines whether they actually execute.
         for i in range(NUM_THREADS):
             self.task_pc[0][i] = THREAD_INACTIVE
             self.task_pc[1][i] = THREAD_INACTIVE
-            self.task_state[0][i] = STATE_PAUSED
-            self.task_state[1][i] = STATE_PAUSED
+            self.task_state[0][i] = STATE_ACTIVE
+            self.task_state[1][i] = STATE_ACTIVE
 
         # Thread 0 starts at offset 0
         self.task_pc[0][0] = 0
-        self.task_state[0][0] = STATE_ACTIVE
 
     def set_code(self, code_data):
         """Set the bytecode segment for execution.
@@ -337,13 +338,16 @@ class VM:
             self.video.copy_page(src, dst, self.regs[VAR_SCROLL_Y])
 
     def _op_update_display(self):
-        """0x10: blit to screen, handle timing, yield"""
+        """0x10: blit to screen, handle timing.
+
+        Note: does NOT yield. The original engine continues executing
+        after updateDisplay. Only yieldTask (0x06) and removeTask (0x11)
+        cause a thread to pause.
+        """
         page_id = self._fetch_byte()
-        # Frame timing and display update handled by engine callback
         if self.video:
             self.video.update_display(page_id)
         self.regs[VAR_TIMER] = 0
-        self._paused = True
 
     def _op_remove_task(self):
         """0x11: kill current thread"""

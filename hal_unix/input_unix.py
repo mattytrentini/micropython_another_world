@@ -33,9 +33,14 @@ class UnixInput(InputHAL):
     def __init__(self):
         self._old_settings = None
         self._keys = set()
+        self._tty_ok = False
         if _HAS_TERMIOS:
-            self._old_settings = termios.tcgetattr(sys.stdin.fileno())
-            tty.setcbreak(sys.stdin.fileno())
+            try:
+                self._old_settings = termios.tcgetattr(sys.stdin.fileno())
+                tty.setcbreak(sys.stdin.fileno())
+                self._tty_ok = True
+            except (termios.error, OSError):
+                pass  # not a real terminal (piped, CI, etc.)
 
     def poll(self):
         state = InputState()
@@ -93,6 +98,9 @@ class UnixInput(InputHAL):
 
     def shutdown(self):
         """Restore terminal settings."""
-        if _HAS_TERMIOS and self._old_settings:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
-                              self._old_settings)
+        if self._tty_ok and self._old_settings:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
+                                  self._old_settings)
+            except (termios.error, OSError):
+                pass

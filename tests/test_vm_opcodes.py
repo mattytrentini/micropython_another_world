@@ -423,12 +423,12 @@ def test_op_copy_page_stub():
 
 
 def test_op_update_display_stub():
-    """0x10: updateDisplay (stub, verify it yields)"""
+    """0x10: updateDisplay (does NOT yield, continues executing)"""
     code = bytearray([
         0x00, 0x10, 0x00, 0x01,  # movConst var[0x10] = 1
         0x10, 0xFF,               # updateDisplay page=0xFF
-        0x00, 0x20, 0x00, 0x02,  # movConst var[0x20] = 2 (next frame)
-        0x06,
+        0x00, 0x20, 0x00, 0x02,  # movConst var[0x20] = 2
+        0x06,                     # yieldTask
     ])
     vm = VM()
     vm.set_code(code)
@@ -436,7 +436,7 @@ def test_op_update_display_stub():
     vm.task_state[0][0] = STATE_ACTIVE
     vm.run_tasks()
     assert vm.regs[0x10] == 1
-    assert vm.regs[0x20] == 0  # not yet (updateDisplay yields)
+    assert vm.regs[0x20] == 2  # updateDisplay does NOT yield
     assert vm.regs[VAR_TIMER] == 0
 
 
