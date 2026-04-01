@@ -36,6 +36,7 @@ class Engine:
         self.vm.resource = self.resource
         self.vm.mixer = self.mixer
         self.video.polygon = self.polygon
+        self.video.resource = self.resource
         self.video.font_data = FONT
         self.video.strings = STRINGS
 
