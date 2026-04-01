@@ -109,6 +109,8 @@ class Engine:
         if self.resource.current_part != self._current_part:
             self._current_part = self.resource.current_part
             self._apply_part_data()
+            self.vm.set_code(self.resource.seg_code)
+            self.vm.restart_at(self._current_part)
 
         # Present the last display update from this frame (if any)
         if self._display_pending:

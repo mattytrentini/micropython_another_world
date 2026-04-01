@@ -55,10 +55,10 @@ class Video:
         # Polygon renderer (set externally)
         self.polygon = None
 
-        # Shape data segments — either set directly or read from resource
+        # Shape data segments (updated between frames by engine)
         self.seg_video1 = None
         self.seg_video2 = None
-        self.resource = None  # if set, reads segments from here instead
+        self.resource = None  # used for palette reads only
 
     def get_page_id(self, page_arg):
         """Resolve a page argument to a page index (0-3).
@@ -298,13 +298,7 @@ class Video:
         if self.polygon is None:
             return
 
-        # Read segments from resource if available (always up-to-date
-        # even after level transitions), otherwise use local copies.
-        res = self.resource
-        if res is not None:
-            data = res.seg_video2 if use_seg_video2 else res.seg_video1
-        else:
-            data = self.seg_video2 if use_seg_video2 else self.seg_video1
+        data = self.seg_video2 if use_seg_video2 else self.seg_video1
         if data is None:
             return
 
