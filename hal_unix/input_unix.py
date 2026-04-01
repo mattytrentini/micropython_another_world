@@ -13,9 +13,18 @@ except ImportError:
     sys.path.insert(0, ".")
     from aw.hal import InputHAL, InputState
 
+_poll_obj = None
 try:
     import select
-    _HAS_SELECT = True
+    if hasattr(select, "select"):
+        _HAS_SELECT = True
+    elif hasattr(select, "poll"):
+        # MicroPython: use select.poll() instead of select.select()
+        _poll_obj = select.poll()
+        _poll_obj.register(sys.stdin, select.POLLIN)
+        _HAS_SELECT = True
+    else:
+        _HAS_SELECT = False
 except ImportError:
     _HAS_SELECT = False
 
@@ -58,14 +67,19 @@ class UnixInput(InputHAL):
         self._keys.clear()
         return state
 
+    def _stdin_ready(self):
+        """Check if stdin has data available (non-blocking)."""
+        if _poll_obj is not None:
+            return bool(_poll_obj.poll(0))
+        return bool(select.select([sys.stdin], [], [], 0)[0])
+
     def _read_keys(self):
         """Read all pending keystrokes without blocking."""
         if not _HAS_SELECT:
             return
 
         while True:
-            rlist, _, _ = select.select([sys.stdin], [], [], 0)
-            if not rlist:
+            if not self._stdin_ready():
                 break
 
             ch = os.read(sys.stdin.fileno(), 1)
@@ -73,18 +87,26 @@ class UnixInput(InputHAL):
                 break
 
             if ch == b'\x1b':
-                # Escape sequence
-                seq = os.read(sys.stdin.fileno(), 2)
+                # Read the full escape sequence (variable length)
+                seq = b''
+                while self._stdin_ready():
+                    b = os.read(sys.stdin.fileno(), 1)
+                    if not b:
+                        break
+                    seq += b
+                    # Stop after the final letter byte of a CSI sequence
+                    if len(seq) >= 2 and seq[0:1] == b'[' and b.isalpha():
+                        break
                 if seq == b'[A':
                     self._keys.add("up")
                 elif seq == b'[B':
                     self._keys.add("down")
-                elif seq == b'[C':
-                    self._keys.add("right")
-                elif seq == b'[D':
-                    self._keys.add("left")
-                else:
-                    self._keys.add("quit")  # bare Escape = quit
+                elif seq == b'[C' or seq.endswith(b'C'):
+                    self._keys.add("right")  # including Ctrl/Shift+Right
+                elif seq == b'[D' or seq.endswith(b'D'):
+                    self._keys.add("left")   # including Ctrl/Shift+Left
+                elif seq == b'':
+                    self._keys.add("quit")  # bare Escape (no following bytes)
             elif ch == b' ' or ch == b'\r' or ch == b'\n':
                 self._keys.add("action")
             elif ch == b'q' or ch == b'\x03':  # q or Ctrl-C

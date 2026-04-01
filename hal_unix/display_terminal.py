@@ -8,7 +8,6 @@ Uses synchronized output (mode 2026) to eliminate flicker on modern terminals.
 """
 
 import sys
-import os
 
 try:
     from aw.hal import DisplayHAL
@@ -38,8 +37,22 @@ _RESET = "\x1b[0m"
 _SYNC_BEGIN = "\x1b[?2026h"
 _SYNC_END = "\x1b[?2026l"
 
-# stdout file descriptor for raw writes
-_FD = 1
+
+def _make_writer():
+    """Select the best stdout write method available."""
+    try:
+        import os
+        os.write(1, b"")  # test it works
+        return lambda data: os.write(1, data)
+    except (AttributeError, OSError, ImportError):
+        pass
+    try:
+        buf = sys.stdout.buffer
+        return lambda data: buf.write(data)
+    except AttributeError:
+        return lambda data: sys.stdout.write(data)
+
+_write = _make_writer()
 
 
 class TerminalDisplay(DisplayHAL):
@@ -72,7 +85,7 @@ class TerminalDisplay(DisplayHAL):
             self._bg[i] = "\x1b[48;2;{};{};{}m".format(r, g, b)
 
     def init(self, width, height):
-        os.write(_FD, (_HIDE_CURSOR + _CLEAR + _HOME).encode())
+        _write((_HIDE_CURSOR + _CLEAR + _HOME).encode())
 
     def update_palette(self, palette):
         if palette:
@@ -139,7 +152,7 @@ class TerminalDisplay(DisplayHAL):
         parts.append(_SYNC_END)
 
         # Single raw write — avoids Python text-mode overhead
-        os.write(_FD, "".join(parts).encode())
+        _write("".join(parts).encode())
 
     def shutdown(self):
-        os.write(_FD, (_SHOW_CURSOR + _RESET + "\n").encode())
+        _write((_SHOW_CURSOR + _RESET + "\n").encode())

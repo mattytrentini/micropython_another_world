@@ -136,7 +136,12 @@ class VM:
             st0[i] = st1[i]
 
     def run_tasks(self):
-        """Execute all active threads for one frame."""
+        """Execute all active threads for one frame.
+
+        Re-reads seg_code before each thread, matching the C reference
+        where _scriptPtr.pc = res->segBytecode + n. This is needed
+        because op_updateResources can change the code segment mid-frame.
+        """
         for i in range(NUM_THREADS):
             if self.task_state[0][i] != STATE_ACTIVE:
                 continue
@@ -144,6 +149,10 @@ class VM:
             pc = self.task_pc[0][i]
             if pc == THREAD_INACTIVE:
                 continue
+
+            # Re-read code segment (may have changed via op_updateResources)
+            if self.resource and self.resource.seg_code:
+                self._code = memoryview(self.resource.seg_code)
 
             self._pc = pc
             self.stack_ptr = 0

@@ -47,6 +47,7 @@ class Engine:
         self._paused = False
         self.debug = False
         self._last_timestamp = 0
+        self._current_part = 0
 
     def init(self, start_part=PART_INTRO):
         """Initialize the engine and load the starting game part."""
@@ -61,6 +62,7 @@ class Engine:
         self.vm.restart_at(start_part)
         self.vm.set_code(self.resource.seg_code)
 
+        self._current_part = start_part
         self._last_timestamp = self.timer.ticks_ms()
 
     def _apply_part_data(self):
@@ -97,15 +99,15 @@ class Engine:
 
         self.vm.update_input(input_state)
 
-        # Check if a new part needs to be loaded
-        if self.resource.current_part != self.vm.resource.current_part:
-            self._apply_part_data()
-            self.vm.set_code(self.resource.seg_code)
-
         # Run VM
         self._display_pending = False
         self.vm.setup_tasks()
         self.vm.run_tasks()
+
+        # Check if VM loaded a new part (via op_updateResources)
+        if self.resource.current_part != self._current_part:
+            self._current_part = self.resource.current_part
+            self._apply_part_data()
 
         # Present the last display update from this frame (if any)
         if self._display_pending:
