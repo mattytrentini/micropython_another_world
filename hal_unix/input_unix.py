@@ -5,7 +5,6 @@ Compatible with MicroPython unix port and CPython.
 """
 
 import sys
-import os
 import time
 
 try:
@@ -35,6 +34,23 @@ try:
     _HAS_TERMIOS = True
 except ImportError:
     _HAS_TERMIOS = False
+
+
+def _make_read1():
+    """Create a portable single-byte stdin reader."""
+    import os
+    if hasattr(os, "read"):
+        fd = sys.stdin.fileno()
+        def _reader():
+            return os.read(fd, 1)
+        return _reader
+    # MicroPython: fall back to sys.stdin.buffer
+    buf = sys.stdin.buffer
+    def _reader():
+        return buf.read(1)
+    return _reader
+
+_read1 = _make_read1()
 
 
 def _ms():
@@ -142,14 +158,14 @@ class UnixInput(InputHAL):
             if not self._stdin_ready():
                 break
 
-            ch = os.read(sys.stdin.fileno(), 1)
+            ch = _read1()
             if not ch:
                 break
 
             if ch == b'\x1b':
                 seq = b''
                 while self._stdin_ready():
-                    b = os.read(sys.stdin.fileno(), 1)
+                    b = _read1()
                     if not b:
                         break
                     seq += b
