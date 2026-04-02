@@ -48,18 +48,24 @@ def _ms():
 class UnixInput(InputHAL):
     """Non-blocking keyboard input from terminal.
 
-    Terminals only send key-down events (no key-up). Each key stays
-    "pressed" for HOLD_MS after the last event, bridging gaps between
-    terminal key repeats without adding noticeable lag on release.
+    Terminals only send key-down events (no key-up), and only repeat
+    the LAST key pressed. When holding two keys (e.g. direction+action),
+    only one generates repeats. To handle this:
+    - Keys expire RELEASE_MS after their last event
+    - BUT as long as ANY key is actively repeating, all recently-pressed
+      keys stay alive (terminals don't repeat multiple keys at once,
+      but the user is likely still holding them)
     """
 
-    HOLD_MS = 130  # ms to keep key held after last event
+    RELEASE_MS = 130   # ms to keep a key after last event (no other activity)
 
     def __init__(self):
         self._old_settings = None
         self._tty_ok = False
         # Map key name -> timestamp (ms) of last event
         self._held = {}
+        # Timestamp of most recent input event (any key)
+        self._last_activity = 0
         # Edge-triggered keys consumed on first read
         self._oneshot = set()
         if _HAS_TERMIOS:
@@ -74,11 +80,20 @@ class UnixInput(InputHAL):
         state = InputState()
         self._read_keys()
 
-        # Expire held keys by time
         now = _ms()
-        expired = [k for k, t in self._held.items() if now - t > self.HOLD_MS]
-        for k in expired:
-            del self._held[k]
+        activity_age = now - self._last_activity
+
+        # If ANY key is actively repeating (recent activity), keep all
+        # held keys alive. Only expire when there's been total silence.
+        if activity_age <= self.RELEASE_MS:
+            # Active input — keep everything held
+            pass
+        else:
+            # No recent input — expire keys individually
+            expired = [k for k, t in self._held.items()
+                       if now - t > self.RELEASE_MS]
+            for k in expired:
+                del self._held[k]
 
         state.left = "left" in self._held
         state.right = "right" in self._held
@@ -96,10 +111,12 @@ class UnixInput(InputHAL):
 
     def _press(self, key):
         """Register a key press."""
+        now = _ms()
+        self._last_activity = now
         if key in ("quit", "pause", "step"):
             self._oneshot.add(key)
         else:
-            self._held[key] = _ms()
+            self._held[key] = now
 
     def _stdin_ready(self):
         """Check if stdin has data available (non-blocking)."""
