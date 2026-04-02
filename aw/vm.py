@@ -87,18 +87,13 @@ class VM:
             self._op_play_music,        # 0x1A
         )
 
-    def restart_at(self, part_id):
-        """Initialize VM state and start executing a game part."""
-        # Clear all registers
-        for i in range(NUM_VARIABLES):
-            self.regs[i] = 0
+    def init_for_part(self):
+        """Reset thread state for a new game part.
 
-        # Initialize random seed
-        self.regs[VAR_RANDOM_SEED] = 0x1234  # deterministic seed
-
-        # Initialize all threads: active state but no PC (matching reference).
-        # Threads are "active" by default; only the PC (0xFFFF = inactive)
-        # determines whether they actually execute.
+        Matches the C reference's initForPart(): resets all threads
+        (PC=inactive, state=active) with thread 0 at PC=0.
+        Does NOT clear registers — they persist across level transitions.
+        """
         for i in range(NUM_THREADS):
             self.task_pc[0][i] = THREAD_INACTIVE
             self.task_pc[1][i] = THREAD_INACTIVE
@@ -107,6 +102,16 @@ class VM:
 
         # Thread 0 starts at offset 0
         self.task_pc[0][0] = 0
+
+    def restart_at(self, part_id):
+        """Cold start: clear registers AND reset threads.
+
+        Only used for initial game start, not mid-game transitions.
+        """
+        for i in range(NUM_VARIABLES):
+            self.regs[i] = 0
+        self.regs[VAR_RANDOM_SEED] = 0x1234
+        self.init_for_part()
 
     def set_code(self, code_data):
         """Set the bytecode segment for execution.
