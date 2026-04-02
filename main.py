@@ -9,6 +9,8 @@ Arguments:
     part_id:   optional starting part (default: 16001 = intro)
                16000=protection, 16001=intro, 16002=water, etc.
     --debug:  enable debug mode (frame counter, pause/step)
+    --reg=R:V set VM register R to value V before start (hex with 0x prefix)
+              multiple: --reg=0x67:37,0x00:21
 
 Controls:
     Arrow keys or WASD: movement
@@ -37,6 +39,15 @@ def main():
     part_id = int(args[1]) if len(args) > 1 else 16001
     debug = "--debug" in flags
 
+    # Parse --reg=0xNN:val to pre-set VM registers for cold-starting levels
+    preset_regs = {}
+    for f in flags:
+        if f.startswith("--reg="):
+            for pair in f[6:].split(","):
+                reg_s, val_s = pair.split(":")
+                preset_regs[int(reg_s, 0)] = int(val_s, 0)
+
+
     # Import after arg check so errors are clearer
     from aw.engine import Engine
     from hal_unix.display_terminal import TerminalDisplay
@@ -54,6 +65,8 @@ def main():
 
     try:
         engine.init(start_part=part_id)
+        for reg, val in preset_regs.items():
+            engine.vm.regs[reg] = val
         engine.run()
     except KeyboardInterrupt:
         pass
