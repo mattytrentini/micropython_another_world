@@ -30,7 +30,6 @@ except ImportError:
 
 try:
     import termios
-    import tty
     _HAS_TERMIOS = True
 except ImportError:
     _HAS_TERMIOS = False
@@ -93,10 +92,17 @@ class UnixInput(InputHAL):
         self._oneshot = set()
         if _HAS_TERMIOS:
             try:
-                self._old_settings = termios.tcgetattr(sys.stdin.fileno())
-                tty.setcbreak(sys.stdin.fileno())
+                fd = sys.stdin.fileno()
+                self._old_settings = termios.tcgetattr(fd)
+                # Set cbreak mode (equivalent to tty.setcbreak):
+                # disable ECHO and ICANON in lflag (index 3)
+                mode = list(self._old_settings)
+                ECHO = 8
+                ICANON = 2
+                mode[3] = mode[3] & ~(ECHO | ICANON)
+                termios.tcsetattr(fd, termios.TCSANOW, mode)
                 self._tty_ok = True
-            except (termios.error, OSError):
+            except (OSError, Exception):
                 pass
 
     def poll(self):
@@ -204,5 +210,5 @@ class UnixInput(InputHAL):
             try:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN,
                                   self._old_settings)
-            except (termios.error, OSError):
+            except (OSError, Exception):
                 pass
