@@ -49,22 +49,29 @@ class UnixInput(InputHAL):
     """Non-blocking keyboard input from terminal.
 
     Terminals only send key-down events (no key-up), and only repeat
-    the LAST key pressed. When holding two keys (e.g. direction+action),
-    only one generates repeats. To handle this:
-    - Keys expire RELEASE_MS after their last event
-    - BUT as long as ANY key is actively repeating, all recently-pressed
-      keys stay alive (terminals don't repeat multiple keys at once,
-      but the user is likely still holding them)
+    the LAST key pressed. Two problems to solve:
+    1. Holding one key: initial repeat delay (~300-500ms) of silence
+    2. Holding two keys: only the last one repeats; pressing a new key
+       causes a fresh initial delay with ZERO events for either key
+
+    Solution: two timeout windows.
+    - QUIET_MS (130ms): if the ONLY thing that happened is silence after
+      key repeats were flowing, keys expire quickly (responsive release).
+    - COMBO_MS (500ms): if a NEW key was recently pressed, keep ALL keys
+      alive longer to bridge the initial repeat delay.
     """
 
-    RELEASE_MS = 130   # ms to keep a key after last event (no other activity)
+    QUIET_MS = 130   # ms to expire after established repeats stop
+    COMBO_MS = 500   # ms to keep keys alive after a new keypress
 
     def __init__(self):
         self._old_settings = None
         self._tty_ok = False
         # Map key name -> timestamp (ms) of last event
         self._held = {}
-        # Timestamp of most recent input event (any key)
+        # Timestamp of most recent NEW keypress (not a repeat)
+        self._last_new_press = 0
+        # Timestamp of most recent event of any kind
         self._last_activity = 0
         # Edge-triggered keys consumed on first read
         self._oneshot = set()
@@ -81,19 +88,19 @@ class UnixInput(InputHAL):
         self._read_keys()
 
         now = _ms()
-        activity_age = now - self._last_activity
+        since_new = now - self._last_new_press
+        since_any = now - self._last_activity
 
-        # If ANY key is actively repeating (recent activity), keep all
-        # held keys alive. Only expire when there's been total silence.
-        if activity_age <= self.RELEASE_MS:
-            # Active input — keep everything held
-            pass
-        else:
-            # No recent input — expire keys individually
-            expired = [k for k, t in self._held.items()
-                       if now - t > self.RELEASE_MS]
-            for k in expired:
-                del self._held[k]
+        # Pick the appropriate timeout:
+        # - If a new key was pressed recently, use the longer COMBO_MS
+        #   to bridge the initial repeat delay
+        # - Otherwise use the shorter QUIET_MS for responsive release
+        timeout = self.COMBO_MS if since_new < self.COMBO_MS else self.QUIET_MS
+
+        if since_any > timeout:
+            # Total silence beyond timeout — expire all
+            self._held.clear()
+        # else: keep everything held
 
         state.left = "left" in self._held
         state.right = "right" in self._held
@@ -116,6 +123,8 @@ class UnixInput(InputHAL):
         if key in ("quit", "pause", "step"):
             self._oneshot.add(key)
         else:
+            if key not in self._held:
+                self._last_new_press = now
             self._held[key] = now
 
     def _stdin_ready(self):
