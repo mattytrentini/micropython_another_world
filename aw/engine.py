@@ -35,6 +35,7 @@ class Engine:
         self.vm.video = self.video
         self.vm.resource = self.resource
         self.vm.mixer = self.mixer
+        self.vm.on_update_display = self._on_vm_update_display
         self.video.polygon = self.polygon
         self.video.resource = self.resource
         self.video.font_data = FONT
@@ -139,6 +140,17 @@ class Engine:
         if palette_rgb:
             self.display.update_palette(palette_rgb)
         self._display_pending = True
+
+    def _on_vm_update_display(self):
+        """Called by VM on each updateDisplay opcode.
+
+        Re-polls input so cutscene skip checks see fresh button state.
+        Matches the reference's inp_handleSpecialKeys() in op_blitFramebuffer.
+        """
+        input_state = self.input.poll()
+        if input_state.quit:
+            self._quit = True
+        self.vm.update_input(input_state)
 
     def _present(self):
         """Actually push the current display page to the terminal."""

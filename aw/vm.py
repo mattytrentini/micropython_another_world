@@ -53,6 +53,7 @@ class VM:
         # Callbacks set by engine (video, resource, etc.)
         self.video = None
         self.resource = None
+        self.on_update_display = None  # called on each updateDisplay for input refresh
         self.mixer = None
 
         # Build opcode dispatch table
@@ -357,11 +358,14 @@ class VM:
     def _op_update_display(self):
         """0x10: blit to screen, handle timing.
 
-        Note: does NOT yield. The original engine continues executing
-        after updateDisplay. Only yieldTask (0x06) and removeTask (0x11)
-        cause a thread to pause.
+        The reference calls inp_handleSpecialKeys() here, refreshing
+        input on every updateDisplay. This is critical for cutscene
+        skipping where multiple updateDisplay calls happen per frame.
         """
         page_id = self._fetch_byte()
+        # Re-poll input (matching reference: inp_handleSpecialKeys)
+        if self.on_update_display:
+            self.on_update_display()
         if self.video:
             self.video.update_display(page_id)
         self.regs[VAR_TIMER] = 0
