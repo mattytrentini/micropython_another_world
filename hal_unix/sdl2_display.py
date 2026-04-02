@@ -6,9 +6,14 @@ via SDL_GetKeyboardState. No C compilation needed.
 
 import ctypes
 import ctypes.util
+import os
 
 from aw.hal import DisplayHAL
 from aw.consts import SCREEN_W, SCREEN_H
+
+# Hint SDL to use X11 on WSL/WSLg (Wayland driver can hang)
+if "WSL_DISTRO_NAME" in os.environ and "SDL_VIDEODRIVER" not in os.environ:
+    os.environ["SDL_VIDEODRIVER"] = "x11"
 
 STRIDE = SCREEN_W // 2  # 160
 
@@ -130,9 +135,13 @@ class SDL2Display(DisplayHAL):
         self._renderer = None
         self._texture = None
         # RGB24 pixel buffer for texture upload (320*200*3 bytes)
-        self._rgb_buf = (ctypes.c_uint8 * (SCREEN_W * SCREEN_H * 3))()
-        # Current palette: 16 entries of (r, g, b)
+        self._rgb_buf = bytearray(SCREEN_W * SCREEN_H * 3)
+        self._rgb_cptr = (ctypes.c_uint8 * len(self._rgb_buf)).from_buffer(self._rgb_buf)
+        # Byte lookup table: for each of 256 possible packed byte values,
+        # 6 bytes of RGB24 (2 pixels). Rebuilt when palette changes.
+        self._lut = bytearray(256 * 6)
         self._palette = [(0, 0, 0)] * 16
+        self._build_lut()
         self._quit_requested = False
         # Keyboard state pointer (updated by SDL_PollEvent)
         self._keystate = None
@@ -156,11 +165,9 @@ class SDL2Display(DisplayHAL):
                 _sdl.SDL_GetError().decode()))
 
         self._renderer = _sdl.SDL_CreateRenderer(
-            self._window, -1,
-            SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC,
+            self._window, -1, SDL_RENDERER_ACCELERATED,
         )
         if not self._renderer:
-            # Fallback to software
             self._renderer = _sdl.SDL_CreateRenderer(self._window, -1, 0)
 
         self._texture = _sdl.SDL_CreateTexture(
@@ -173,37 +180,33 @@ class SDL2Display(DisplayHAL):
         # Get keyboard state pointer
         self._keystate = _sdl.SDL_GetKeyboardState(None)
 
+    def _build_lut(self):
+        """Build byte→RGB24 lookup: list of 256 bytes objects, 6 bytes each."""
+        pal = self._palette
+        self._lut = []
+        for byte_val in range(256):
+            hi = (byte_val >> 4) & 0x0F
+            lo = byte_val & 0x0F
+            r1, g1, b1 = pal[hi]
+            r2, g2, b2 = pal[lo]
+            self._lut.append(bytes((r1, g1, b1, r2, g2, b2)))
+
     def update_palette(self, palette):
         if palette:
             self._palette = list(palette)
+            self._build_lut()
 
     def present(self, framebuf_4bpp):
-        """Convert 4bpp packed buffer to RGB24 and upload to texture."""
-        pal = self._palette
-        rgb = self._rgb_buf
-        buf = framebuf_4bpp
-        dst = 0
-
-        for y in range(SCREEN_H):
-            src_off = y * STRIDE
-            for x in range(0, SCREEN_W, 2):
-                byte = buf[src_off + x // 2]
-                # High nibble = left pixel
-                r, g, b = pal[(byte >> 4) & 0x0F]
-                rgb[dst] = r
-                rgb[dst + 1] = g
-                rgb[dst + 2] = b
-                # Low nibble = right pixel
-                r, g, b = pal[byte & 0x0F]
-                rgb[dst + 3] = r
-                rgb[dst + 4] = g
-                rgb[dst + 5] = b
-                dst += 6
+        """Convert 4bpp packed buffer to RGB24 via LUT and upload."""
+        lut = self._lut
+        # bytes.join with list comprehension runs at C speed
+        rgb_bytes = b"".join(lut[b] for b in framebuf_4bpp[:SCREEN_H * STRIDE])
+        ctypes.memmove(self._rgb_cptr, rgb_bytes, len(rgb_bytes))
 
         _sdl.SDL_UpdateTexture(
             self._texture, None,
-            ctypes.cast(rgb, ctypes.c_void_p),
-            SCREEN_W * 3,  # pitch in bytes
+            ctypes.cast(self._rgb_cptr, ctypes.c_void_p),
+            SCREEN_W * 3,
         )
         _sdl.SDL_RenderClear(self._renderer)
         _sdl.SDL_RenderCopy(self._renderer, self._texture, None, None)
