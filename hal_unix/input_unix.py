@@ -6,6 +6,7 @@ Compatible with MicroPython unix port and CPython.
 
 import sys
 import os
+import time
 
 try:
     from aw.hal import InputHAL, InputState
@@ -36,59 +37,69 @@ except ImportError:
     _HAS_TERMIOS = False
 
 
+def _ms():
+    """Current time in milliseconds."""
+    try:
+        return int(time.monotonic() * 1000)
+    except AttributeError:
+        return time.ticks_ms()
+
+
 class UnixInput(InputHAL):
     """Non-blocking keyboard input from terminal.
 
-    Terminals only send key-down events (no key-up). When holding a key,
-    there's an initial delay (~300-500ms) before repeats start. To simulate
-    held keys, each key stays "pressed" for HOLD_FRAMES frames after the
-    last event — long enough to bridge the initial repeat delay.
+    Terminals only send key-down events (no key-up). Each key stays
+    "pressed" for HOLD_MS after the last event, bridging gaps between
+    terminal key repeats without adding noticeable lag on release.
     """
 
-    HOLD_FRAMES = 25  # ~500ms at 50Hz, covers typical repeat delay
+    HOLD_MS = 130  # ms to keep key held after last event
 
     def __init__(self):
         self._old_settings = None
         self._tty_ok = False
-        # Map key name -> frames remaining until release
+        # Map key name -> timestamp (ms) of last event
         self._held = {}
+        # Edge-triggered keys consumed on first read
+        self._oneshot = set()
         if _HAS_TERMIOS:
             try:
                 self._old_settings = termios.tcgetattr(sys.stdin.fileno())
                 tty.setcbreak(sys.stdin.fileno())
                 self._tty_ok = True
             except (termios.error, OSError):
-                pass  # not a real terminal (piped, CI, etc.)
+                pass
 
     def poll(self):
         state = InputState()
         self._read_keys()
 
-        # Decay held keys
-        expired = []
-        for key, frames in self._held.items():
-            if frames <= 0:
-                expired.append(key)
-            else:
-                self._held[key] = frames - 1
-        for key in expired:
-            del self._held[key]
+        # Expire held keys by time
+        now = _ms()
+        expired = [k for k, t in self._held.items() if now - t > self.HOLD_MS]
+        for k in expired:
+            del self._held[k]
 
         state.left = "left" in self._held
         state.right = "right" in self._held
         state.up = "up" in self._held
         state.down = "down" in self._held
         state.action = "action" in self._held
-        state.quit = self._held.pop("quit", 0) > 0
-        # Pause and step are edge-triggered (one-shot, not held)
-        state.pause = self._held.pop("pause", 0) > 0
-        state.step = self._held.pop("step", 0) > 0
+
+        # Edge-triggered (consumed on read)
+        state.quit = "quit" in self._oneshot
+        state.pause = "pause" in self._oneshot
+        state.step = "step" in self._oneshot
+        self._oneshot.clear()
 
         return state
 
     def _press(self, key):
-        """Register a key press, resetting its hold timer."""
-        self._held[key] = self.HOLD_FRAMES
+        """Register a key press."""
+        if key in ("quit", "pause", "step"):
+            self._oneshot.add(key)
+        else:
+            self._held[key] = _ms()
 
     def _stdin_ready(self):
         """Check if stdin has data available (non-blocking)."""
@@ -110,14 +121,12 @@ class UnixInput(InputHAL):
                 break
 
             if ch == b'\x1b':
-                # Read the full escape sequence (variable length)
                 seq = b''
                 while self._stdin_ready():
                     b = os.read(sys.stdin.fileno(), 1)
                     if not b:
                         break
                     seq += b
-                    # Stop after the final letter byte of a CSI sequence
                     if len(seq) >= 2 and seq[0:1] == b'[' and b.isalpha():
                         break
                 if seq == b'[A':
@@ -125,14 +134,14 @@ class UnixInput(InputHAL):
                 elif seq == b'[B':
                     self._press("down")
                 elif seq == b'[C' or seq.endswith(b'C'):
-                    self._press("right")  # including Ctrl/Shift+Right
+                    self._press("right")
                 elif seq == b'[D' or seq.endswith(b'D'):
-                    self._press("left")   # including Ctrl/Shift+Left
+                    self._press("left")
                 elif seq == b'':
-                    self._press("quit")  # bare Escape (no following bytes)
+                    self._press("quit")
             elif ch == b' ' or ch == b'\r' or ch == b'\n':
                 self._press("action")
-            elif ch == b'q' or ch == b'\x03':  # q or Ctrl-C
+            elif ch == b'q' or ch == b'\x03':
                 self._press("quit")
             elif ch == b'w' or ch == b'k':
                 self._press("up")
