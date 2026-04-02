@@ -110,14 +110,27 @@ class TerminalDisplay(DisplayHAL):
             bot_off = y_bot * _STRIDE
 
             for col in range(cols):
-                px = col * scale + scale // 2
-                byte_idx = px >> 1
-                if px & 1:
-                    tc = buf[top_off + byte_idx] & 0x0F
-                    bc = buf[bot_off + byte_idx] & 0x0F
+                if scale == 2:
+                    # Scale 2: one terminal cell per byte (2 pixels).
+                    # Pick the brighter/non-zero pixel so font strokes
+                    # on either column are visible.
+                    tb = buf[top_off + col]
+                    bb = buf[bot_off + col]
+                    th = (tb >> 4) & 0x0F
+                    tl = tb & 0x0F
+                    tc = tl if tl > th else th
+                    bh = (bb >> 4) & 0x0F
+                    bl = bb & 0x0F
+                    bc = bl if bl > bh else bh
                 else:
-                    tc = (buf[top_off + byte_idx] >> 4) & 0x0F
-                    bc = (buf[bot_off + byte_idx] >> 4) & 0x0F
+                    px = col * scale + scale // 2
+                    byte_idx = px >> 1
+                    if px & 1:
+                        tc = buf[top_off + byte_idx] & 0x0F
+                        bc = buf[bot_off + byte_idx] & 0x0F
+                    else:
+                        tc = (buf[top_off + byte_idx] >> 4) & 0x0F
+                        bc = (buf[bot_off + byte_idx] >> 4) & 0x0F
 
                 if tc == bc:
                     # Same color top and bottom: full block, fg only
