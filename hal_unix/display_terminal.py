@@ -71,7 +71,16 @@ class TerminalDisplay(DisplayHAL):
         self.paused = False
         self._frame_num = 0
         self._cols = SCREEN_W // scale
-        self._rows = SCREEN_H // 2  # half-block = 2 vertical pixels per cell
+        self._max_rows = SCREEN_H // 2  # full game: 100 rows
+        # Clamp to terminal height so we don't scroll
+        try:
+            import os
+            term_rows = os.get_terminal_size()[1]
+            reserve = 2 if show_frame else 1  # room for status line + margin
+            self._rows = min(self._max_rows, term_rows - reserve)
+        except (AttributeError, OSError, ValueError):
+            self._rows = self._max_rows
+        self._y_offset = (self._max_rows - self._rows) // 2  # center vertically
         # Pre-computed fg/bg escape strings per palette color (set in update_palette)
         self._fg = [None] * 16
         self._bg = [None] * 16
@@ -103,8 +112,9 @@ class TerminalDisplay(DisplayHAL):
         prev_fg_idx = -1
         prev_bg_idx = -1
 
+        y_off = self._y_offset
         for row in range(self._rows):
-            y_top = row * 2
+            y_top = (row + y_off) * 2
             y_bot = y_top + 1
             top_off = y_top * _STRIDE
             bot_off = y_bot * _STRIDE
