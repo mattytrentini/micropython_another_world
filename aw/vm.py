@@ -55,6 +55,7 @@ class VM:
         self.resource = None
         self.on_update_display = None  # called on each updateDisplay for input refresh
         self.mixer = None
+        self._part_changed = False     # set when op_updateResources loads a new part
 
         # Build opcode dispatch table
         self._optable = (
@@ -148,8 +149,18 @@ class VM:
         where _scriptPtr.pc = res->segBytecode + n. This is needed
         because op_updateResources can change the code segment between
         threads within the same frame.
+
+        If a thread triggers a level transition (op_updateResources),
+        remaining threads are skipped — their PCs are for the OLD code
+        and would be invalid against the new code. The engine's post-frame
+        init_for_part() handles the reset.
         """
+        self._part_changed = False
+
         for i in range(NUM_THREADS):
+            if self._part_changed:
+                break  # new part loaded — skip remaining threads
+
             if self.task_state[0][i] != STATE_ACTIVE:
                 continue
 
@@ -157,10 +168,7 @@ class VM:
             if pc == THREAD_INACTIVE:
                 continue
 
-            # Re-read code segment from resource. Note: if a thread calls
-            # op_updateResources, the code changes but the CURRENT thread
-            # keeps its old _code reference (via the local in _execute).
-            # The new code takes effect for subsequent threads/frames.
+            # Re-read code segment from resource.
             if self.resource and self.resource.seg_code is not None:
                 self._code = memoryview(self.resource.seg_code)
 
@@ -435,7 +443,10 @@ class VM:
             if res_id == 0:
                 self.resource.invalidate_all()
             else:
+                old_part = self.resource.current_part
                 self.resource.load_or_setup_part(res_id)
+                if self.resource.current_part != old_part:
+                    self._part_changed = True
 
     def _op_play_music(self):
         """0x1A: play/stop music"""
