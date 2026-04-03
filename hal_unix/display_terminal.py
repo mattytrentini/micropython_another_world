@@ -71,16 +71,8 @@ class TerminalDisplay(DisplayHAL):
         self.paused = False
         self._frame_num = 0
         self._cols = SCREEN_W // scale
-        self._max_rows = SCREEN_H // 2  # full game: 100 rows
-        # Clamp to terminal height so we don't scroll
-        try:
-            import os
-            term_rows = os.get_terminal_size()[1]
-            reserve = 2 if show_frame else 1  # room for status line + margin
-            self._rows = min(self._max_rows, term_rows - reserve)
-        except (AttributeError, OSError, ValueError):
-            self._rows = self._max_rows
-        self._y_offset = 0  # auto-scrolls to follow content
+        self._rows = SCREEN_H // 2  # 100 rows (half-block = 2 vertical pixels)
+        self._y_offset = 0
         # Pre-computed fg/bg escape strings per palette color (set in update_palette)
         self._fg = [None] * 16
         self._bg = [None] * 16
@@ -99,19 +91,6 @@ class TerminalDisplay(DisplayHAL):
     def update_palette(self, palette):
         if palette:
             self._set_palette(palette)
-
-    def set_focus_y(self, game_y):
-        """Set the viewport to center on a game Y coordinate (0-199).
-
-        Called by the engine each frame with the character's Y position.
-        """
-        if self._rows >= self._max_rows:
-            return
-        # Convert game Y to half-block row and center viewport
-        half_row = game_y // 2
-        ideal_offset = half_row - self._rows // 2
-        max_offset = self._max_rows - self._rows
-        self._y_offset = max(0, min(ideal_offset, max_offset))
 
     def present(self, framebuf_4bpp):
         """Render the 4bpp framebuffer to terminal."""
