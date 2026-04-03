@@ -65,6 +65,10 @@ class Resource:
 
         self.current_part = 0
 
+        # Callback for bitmap resources: called with 4bpp page data
+        # to write to the current draw page. Set by engine.
+        self.on_bitmap_loaded = None
+
     def detect_format(self):
         """Auto-detect the game data format.
 
@@ -214,6 +218,9 @@ class Resource:
             return
 
         if self.data_format == FMT_20TH:
+            # Try BMP first (bitmap backgrounds)
+            if self._try_load_bmp(res_id):
+                return
             buf = self._load_dat_file(res_id)
             if buf is not None:
                 me = self.mem_list[res_id]
@@ -222,6 +229,61 @@ class Resource:
         else:
             self.mem_list[res_id].status = STATUS_TOLOAD
             self._load_marked()
+
+    def _try_load_bmp(self, res_id):
+        """Try to load a BMP bitmap resource from game/BMP/.
+
+        BMP files are 320x200, 8-bit indexed, bottom-up. They get
+        converted to 4bpp packed format and written directly to the
+        current draw page (matching rawgl's copyBitmapPtr behavior).
+
+        Returns True if a BMP was found and loaded.
+        """
+        path = "game/BMP/file{:03d}.bmp".format(res_id)
+        if not self.file_hal.file_exists(path):
+            return False
+
+        data = self.file_hal.read_file(path)
+        if data is None or len(data) < 1078:
+            return False
+
+        # Parse BMP header
+        if data[0:2] != b'BM':
+            return False
+
+        import struct
+        pixel_offset = struct.unpack_from("<I", data, 10)[0]
+        width = struct.unpack_from("<i", data, 18)[0]
+        height = struct.unpack_from("<i", data, 22)[0]
+        bpp = struct.unpack_from("<H", data, 28)[0]
+
+        if width != 320 or abs(height) != 200 or bpp != 8:
+            return False
+
+        bottom_up = height > 0
+
+        # Convert 8bpp → 4bpp packed, writing to a page-sized buffer
+        page_buf = bytearray(32000)  # 320*200/2
+        stride_4bpp = 160  # 320/2
+
+        for y in range(200):
+            if bottom_up:
+                src_y = 199 - y
+            else:
+                src_y = y
+            src_off = pixel_offset + src_y * width
+            dst_off = y * stride_4bpp
+
+            for x in range(0, 320, 2):
+                hi = data[src_off + x] & 0x0F
+                lo = data[src_off + x + 1] & 0x0F
+                page_buf[dst_off + x // 2] = (hi << 4) | lo
+
+        # Write to current draw page via callback
+        if self.on_bitmap_loaded:
+            self.on_bitmap_loaded(page_buf)
+
+        return True
 
     # --- 20th Anniversary Edition loading ---
 

@@ -91,6 +91,15 @@ class Video:
         """Return the FrameBuffer of the current draw page (or None)."""
         return self.page_fbs[self.buffers[0]]
 
+    def load_bitmap(self, page_data):
+        """Write a 4bpp bitmap to the current draw page.
+
+        Called by the resource loader when a BMP bitmap is loaded.
+        Matches rawgl's copyBitmapPtr behavior.
+        """
+        draw_buf = self.get_draw_buf()
+        draw_buf[:] = page_data
+
     # --- Opcodes ---
 
     def select_page(self, page_id):

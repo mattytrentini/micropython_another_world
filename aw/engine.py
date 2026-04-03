@@ -40,6 +40,7 @@ class Engine:
         self.video.resource = self.resource
         self.video.font_data = FONT
         self.video.strings = STRINGS
+        self.resource.on_bitmap_loaded = self.video.load_bitmap
 
         # Display callback — defers actual presentation to end of frame
         self.video.on_display = self._on_display
