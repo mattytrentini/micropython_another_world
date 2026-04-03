@@ -79,6 +79,46 @@ PART_LUXE = 16006
 PART_FINAL = 16007
 PART_PASSWORD = 16008
 
+# Password → (checkpoint value for var[0x00], target part ID)
+# Decoded from the game's password validation bytecode (part 16008).
+PASSWORDS = {
+    "LDKD": (10, PART_WATER),
+    "LBBB": (12, PART_WATER),
+    "LFDB": (14, PART_WATER),
+    "HTDC": (20, PART_PRISON),
+    "XKCB": (24, PART_PRISON),
+    "LBJC": (26, PART_PRISON),
+    "CLLD": (30, PART_CITE),
+    "LBKG": (31, PART_CITE),
+    "XDDJ": (32, PART_CITE),
+    "DGKF": (33, PART_CITE),
+    "RBJK": (34, PART_CITE),
+    "FXLC": (35, PART_CITE),
+    "RKDH": (36, PART_CITE),
+    "KRFK": (37, PART_CITE),
+    "FRTX": (38, PART_CITE),
+    "KLFB": (39, PART_CITE),
+    "GLHH": (40, PART_CITE),
+    "TTCT": (41, PART_CITE),
+    "DDRX": (42, PART_CITE),
+    "TBHK": (43, PART_CITE),
+    "BFLX": (44, PART_CITE),
+    "XJRT": (45, PART_CITE),
+    "HRTB": (46, PART_CITE),
+    "HBHK": (47, PART_CITE),
+    "JCGB": (48, PART_CITE),
+    "BRTD": (49, PART_CITE),
+    "CKJL": (50, PART_ARENE),
+    "LFCK": (60, PART_LUXE),
+    "HHFL": (62, PART_LUXE),
+    "TFBB": (64, PART_LUXE),
+    "CRGB": (65, PART_LUXE),
+    "TXHF": (66, PART_LUXE),
+    "XXLF": (67, PART_LUXE),
+    "JHJL": (68, PART_LUXE),
+    "KRTD": (70, PART_FINAL),
+}
+
 # Frame timing
 FRAME_HZ = 50
 FRAME_MS = 1000 // FRAME_HZ  # 20ms per slice

@@ -1,17 +1,17 @@
 """Another World - MicroPython game engine entry point.
 
 Usage:
-    python3 main.py <data_dir> [part_id] [--sdl] [--debug]
-    micropython main.py <data_dir> [part_id] [--debug]
+    python3 main.py <data_dir> [password|part_id] [--sdl] [--debug]
+    micropython main.py <data_dir> [password|part_id] [--debug]
 
 Arguments:
-    data_dir:  path to directory containing game data files
-    part_id:   optional starting part (default: 16001 = intro)
-               16000=protection, 16001=intro, 16002=water, etc.
-    --sdl:    use SDL2 window (proper input, hardware scaling)
-    --debug:  enable debug mode (frame counter, pause/step)
-    --reg=R:V set VM register R to value V before start (hex with 0x prefix)
-              multiple: --reg=0x67:37,0x00:21
+    data_dir:   path to directory containing game data files
+    password:   4-letter checkpoint code (e.g. LDKD, HTDC, CLLD)
+                run 'python3 tools/passwords.py' to see all codes
+    part_id:    numeric starting part (default: 16001 = intro)
+    --sdl:      use SDL2 window (proper input, hardware scaling)
+    --debug:    enable debug mode (frame counter, pause/step)
+    --reg=R:V   set VM register R to value V (hex with 0x prefix)
 
 Controls:
     Arrow keys or WASD: movement
@@ -29,27 +29,44 @@ def main():
     flags = [a for a in sys.argv[1:] if a.startswith("--")]
 
     if len(args) < 1:
-        print("Usage: {} <data_dir> [part_id] [--sdl] [--debug]".format(sys.argv[0]))
+        print("Usage: {} <data_dir> [password|part_id] [--sdl] [--debug]".format(
+            sys.argv[0]))
         print("\ndata_dir: path to game data files")
-        print("part_id:  starting part (default 16001)")
-        print("          16000=protection, 16001=intro, 16002=water")
+        print("password: 4-letter checkpoint code (e.g. LDKD, HTDC, CLLD)")
+        print("part_id:  numeric starting part (default 16001)")
         print("--sdl:   SDL2 window (recommended)")
         print("--debug: frame counter, P to pause, N to step")
+        print("\nRun 'python3 tools/passwords.py' to see all checkpoint codes")
         sys.exit(1)
 
     data_dir = args[0]
-    part_id = int(args[1]) if len(args) > 1 else 16001
+    part_id = 16001
+    checkpoint = None
+
+    if len(args) > 1:
+        arg = args[1]
+        if arg.isalpha():
+            # Password lookup
+            from aw.consts import PASSWORDS
+            pw = arg.upper()
+            if pw not in PASSWORDS:
+                print("Unknown password: {}".format(arg))
+                print("Run 'python3 tools/passwords.py' to see valid codes")
+                sys.exit(1)
+            checkpoint, part_id = PASSWORDS[pw]
+        else:
+            part_id = int(arg)
+
     use_sdl = "--sdl" in flags
     debug = "--debug" in flags
 
-    # Parse --reg=0xNN:val to pre-set VM registers for cold-starting levels
+    # Parse --reg=0xNN:val to pre-set VM registers
     preset_regs = {}
     for f in flags:
         if f.startswith("--reg="):
             for pair in f[6:].split(","):
                 reg_s, val_s = pair.split(":")
                 preset_regs[int(reg_s, 0)] = int(val_s, 0)
-
 
     from aw.engine import Engine
     from hal_unix.file_unix import UnixFile
@@ -77,6 +94,8 @@ def main():
 
     try:
         engine.init(start_part=part_id)
+        if checkpoint is not None:
+            engine.vm.regs[0] = checkpoint
         for reg, val in preset_regs.items():
             engine.vm.regs[reg] = val
         engine.run()
