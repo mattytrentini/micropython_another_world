@@ -162,5 +162,8 @@ class Engine:
 
     def _present(self):
         """Actually push the current display page to the terminal."""
+        # Let the display track the character for viewport scrolling
+        if hasattr(self.display, "set_focus_y"):
+            self.display.set_focus_y(self.vm.regs[0x02])  # var[0x02] = character Y
         display_buf = self.video.page_bufs[self.video.buffers[1]]
         self.display.present(display_buf)
