@@ -72,9 +72,14 @@ def main():
     from hal_unix.file_unix import UnixFile
 
     if use_sdl:
-        from hal_unix.sdl2_display import SDL2Display
-        from hal_unix.sdl2_input import SDL2Input
-        from hal_unix.sdl2_timer import SDL2Timer
+        try:
+            from hal_unix.sdl2_display import SDL2Display
+            from hal_unix.sdl2_input import SDL2Input
+            from hal_unix.sdl2_timer import SDL2Timer
+        except ImportError:
+            print("SDL2 backend requires CPython with ctypes and libSDL2.")
+            print("Use terminal mode instead (remove --sdl).")
+            sys.exit(1)
 
         display = SDL2Display(scale=3)
         inp = SDL2Input(display)
