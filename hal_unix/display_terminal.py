@@ -80,7 +80,7 @@ class TerminalDisplay(DisplayHAL):
             self._rows = min(self._max_rows, term_rows - reserve)
         except (AttributeError, OSError, ValueError):
             self._rows = self._max_rows
-        self._y_offset = (self._max_rows - self._rows) // 2  # center vertically
+        self._y_offset = 0  # crop from bottom, keep top visible
         # Pre-computed fg/bg escape strings per palette color (set in update_palette)
         self._fg = [None] * 16
         self._bg = [None] * 16
