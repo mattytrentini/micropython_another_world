@@ -74,6 +74,13 @@ class Engine:
         self.video.seg_video1 = self.resource.seg_video1
         self.video.seg_video2 = self.resource.seg_video2
 
+        # Apply palette 0 to the display immediately so the first frame
+        # doesn't render with an all-black default palette.
+        if self.resource.seg_palette:
+            self.video._apply_palette(0)
+            if self.video.palette_rgb:
+                self.display.update_palette(self.video.palette_rgb)
+
     def run(self):
         """Main game loop. Runs until quit."""
         while not self._quit:
