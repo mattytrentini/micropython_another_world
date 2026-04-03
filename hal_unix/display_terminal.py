@@ -80,7 +80,7 @@ class TerminalDisplay(DisplayHAL):
             self._rows = min(self._max_rows, term_rows - reserve)
         except (AttributeError, OSError, ValueError):
             self._rows = self._max_rows
-        self._y_offset = 0  # crop from bottom, keep top visible
+        self._y_offset = 0  # auto-scrolls to follow content
         # Pre-computed fg/bg escape strings per palette color (set in update_palette)
         self._fg = [None] * 16
         self._bg = [None] * 16
@@ -100,6 +100,42 @@ class TerminalDisplay(DisplayHAL):
         if palette:
             self._set_palette(palette)
 
+    def _auto_scroll(self, buf):
+        """Adjust y_offset to keep the most active content visible.
+
+        Scans a few columns in the center of the framebuffer to find
+        the vertical range of non-background pixels, then centers the
+        viewport on that range.
+        """
+        if self._rows >= self._max_rows:
+            return  # no cropping needed
+
+        # Sample center columns for non-background pixels
+        # (cheaper than scanning the full buffer)
+        first_active = self._max_rows
+        last_active = 0
+        center_cols = range(60, 100)  # sample columns 60-99 (center of 160)
+
+        for col in center_cols:
+            for half_row in range(self._max_rows):
+                y = half_row * 2
+                b = buf[y * _STRIDE + col]
+                if b != 0:
+                    if half_row < first_active:
+                        first_active = half_row
+                    if half_row > last_active:
+                        last_active = half_row
+
+        if first_active > last_active:
+            return  # no content found
+
+        # Center the active range in the viewport
+        content_center = (first_active + last_active) // 2
+        ideal_offset = content_center - self._rows // 2
+        # Clamp to valid range
+        max_offset = self._max_rows - self._rows
+        self._y_offset = max(0, min(ideal_offset, max_offset))
+
     def present(self, framebuf_4bpp):
         """Render the 4bpp framebuffer to terminal."""
         fg = self._fg
@@ -107,6 +143,9 @@ class TerminalDisplay(DisplayHAL):
         scale = self.scale
         cols = self._cols
         buf = framebuf_4bpp
+
+        self._auto_scroll(buf)
+
         parts = [_SYNC_BEGIN, _HOME]
 
         prev_fg_idx = -1
