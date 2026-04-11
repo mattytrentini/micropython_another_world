@@ -37,11 +37,12 @@ deploy target_port=port:
         $MP fs cp "$f" ":$f"
     done
 
-    # Entry point
-    echo "Copying main_odroid_go.py..."
-    $MP fs cp main_odroid_go.py :main_odroid_go.py
+    # Entry point — installed as main.py so it runs on boot
+    echo "Copying main_odroid_go.py -> main.py..."
+    $MP fs cp main_odroid_go.py :main.py
 
     echo "Done! Game data must be on SD card at /game/DAT/"
+    echo "Reset the device or run 'just run' to start."
 
 # Open a REPL on the device
 repl target_port=port:
@@ -49,7 +50,7 @@ repl target_port=port:
 
 # Deploy and immediately run the game
 run target_port=port: (deploy target_port)
-    mpremote connect {{target_port}} exec "exec(open('main_odroid_go.py').read())"
+    mpremote connect {{target_port}} exec "exec(open('main.py').read())"
 
 # Soft-reset the device
 reset target_port=port:
@@ -71,7 +72,7 @@ clean target_port=port:
     for f in hal_odroid_go/*.py; do
         $MP fs rm ":$f" 2>/dev/null || true
     done
-    $MP fs rm :main_odroid_go.py 2>/dev/null || true
+    $MP fs rm :main.py 2>/dev/null || true
     $MP fs rmdir :aw 2>/dev/null || true
     $MP fs rmdir :hal_odroid_go 2>/dev/null || true
     echo "Done."
