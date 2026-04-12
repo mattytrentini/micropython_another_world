@@ -5,8 +5,11 @@ pushes it to the display. The game image is centered vertically with
 20 pixels of black border (top and bottom).
 
 The palette is pre-converted to RGB565 on each change, and a row-level
-LUT is used to convert 4bpp→RGB565 efficiently.
+LUT is used to convert 4bpp→RGB565 efficiently. The conversion inner
+loop uses @micropython.viper for near-C speed.
 """
+
+import micropython
 
 from machine import Pin, SPI
 import struct
@@ -33,6 +36,7 @@ _CMD_COLMOD = 0x3A
 # MADCTL flags
 _MADCTL_BGR = 0x08
 _MADCTL_MX = 0x40   # mirror X
+_MADCTL_MY = 0x80   # mirror Y
 _MADCTL_MV = 0x20   # swap X/Y
 
 # Vertical offset to center 200 rows in 240
@@ -82,7 +86,7 @@ class OdroidGoDisplay(DisplayHAL):
         self._cmd(_CMD_COLMOD, bytes([0x55]))
 
         # Memory access control: landscape, BGR panel
-        self._cmd(_CMD_MADCTL, bytes([_MADCTL_MX | _MADCTL_MV | _MADCTL_BGR]))
+        self._cmd(_CMD_MADCTL, bytes([_MADCTL_MY | _MADCTL_MV | _MADCTL_BGR]))
 
         self._cmd(_CMD_DISPON)
         time.sleep_ms(100)
@@ -140,6 +144,19 @@ class OdroidGoDisplay(DisplayHAL):
             lut[off + 2] = c_lo >> 8
             lut[off + 3] = c_lo & 0xFF
 
+    @staticmethod
+    @micropython.viper
+    def _convert_row(src: ptr8, src_off: int, lut: ptr8, dst: ptr8, count: int):
+        """Convert one row of 4bpp packed pixels to RGB565 via LUT (viper)."""
+        d = 0
+        for x in range(count):
+            off = int(src[src_off + x]) * 4
+            dst[d] = lut[off]
+            dst[d + 1] = lut[off + 1]
+            dst[d + 2] = lut[off + 2]
+            dst[d + 3] = lut[off + 3]
+            d += 4
+
     def present(self, framebuf_4bpp):
         """Convert 4bpp buffer to RGB565 and push to display."""
         lut = self._lut
@@ -156,17 +173,23 @@ class OdroidGoDisplay(DisplayHAL):
             self._spi.write(self._black_row)
 
         # Game area (320x200)
-        for y in range(SCREEN_H):
-            src_off = y * STRIDE
-            dst = 0
-            for x in range(STRIDE):
-                off = buf[src_off + x] * 4
-                row_buf[dst] = lut[off]
-                row_buf[dst + 1] = lut[off + 1]
-                row_buf[dst + 2] = lut[off + 2]
-                row_buf[dst + 3] = lut[off + 3]
-                dst += 4
-            self._spi.write(row_buf)
+        try:
+            for y in range(SCREEN_H):
+                self._convert_row(buf, y * STRIDE, lut, row_buf, STRIDE)
+                self._spi.write(row_buf)
+        except Exception:
+            # Viper not available — fall back to Python loop
+            for y in range(SCREEN_H):
+                src_off = y * STRIDE
+                dst = 0
+                for x in range(STRIDE):
+                    off = buf[src_off + x] * 4
+                    row_buf[dst] = lut[off]
+                    row_buf[dst + 1] = lut[off + 1]
+                    row_buf[dst + 2] = lut[off + 2]
+                    row_buf[dst + 3] = lut[off + 3]
+                    dst += 4
+                self._spi.write(row_buf)
 
         # Bottom border (black)
         for _ in range(DISPLAY_H - SCREEN_H - _Y_OFFSET):
