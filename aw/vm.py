@@ -7,6 +7,12 @@ with a 64-thread cooperative scheduler and double-buffered task state.
 import array
 import struct
 
+try:
+    from micropython import native
+except ImportError:
+    def native(f):
+        return f
+
 from .consts import (
     NUM_THREADS, NUM_VARIABLES, CALL_STACK_DEPTH,
     THREAD_INACTIVE, THREAD_KILL, STATE_ACTIVE, STATE_PAUSED,
@@ -180,6 +186,7 @@ class VM:
             # Save PC back (may be 0xFFFF if thread was removed)
             self.task_pc[0][i] = self._pc & 0xFFFF
 
+    @native
     def _execute(self):
         """Execute bytecode for the current thread until paused.
 
@@ -203,12 +210,14 @@ class VM:
 
     # --- Fetch helpers (inlined for speed where possible) ---
 
+    @native
     def _fetch_byte(self):
         """Fetch unsigned byte from code, advance PC."""
         v = self._code[self._pc]
         self._pc += 1
         return v
 
+    @native
     def _fetch_word(self):
         """Fetch big-endian unsigned 16-bit word from code, advance PC."""
         pc = self._pc
@@ -216,6 +225,7 @@ class VM:
         self._pc = pc + 2
         return v
 
+    @native
     def _fetch_sword(self):
         """Fetch big-endian signed 16-bit word from code, advance PC."""
         v = self._fetch_word()

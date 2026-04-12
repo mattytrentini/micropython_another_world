@@ -14,6 +14,12 @@ matching the original Sanglard reference implementation.
 
 from .consts import SCREEN_W, SCREEN_H
 
+try:
+    from micropython import native
+except ImportError:
+    def native(f):
+        return f
+
 # Row stride in bytes
 STRIDE = SCREEN_W // 2  # 160
 
@@ -147,17 +153,20 @@ class PolygonRenderer:
         self._data = memoryview(data) if not isinstance(data, memoryview) else data
         self._data_pos = offset
 
+    @native
     def _fetch_byte(self):
         v = self._data[self._data_pos]
         self._data_pos += 1
         return v
 
+    @native
     def _fetch_word(self):
         pos = self._data_pos
         v = (self._data[pos] << 8) | self._data[pos + 1]
         self._data_pos = pos + 2
         return v
 
+    @native
     def draw_shape(self, color, zoom, x, y):
         """Entry point: read shape type and dispatch.
 
@@ -178,6 +187,7 @@ class PolygonRenderer:
             if i == 2:
                 self._draw_shape_parts(zoom, x, y)
 
+    @native
     def _draw_shape_parts(self, zoom, pgc_x, pgc_y):
         """Render hierarchical shape with child sub-shapes."""
         z64 = zoom
@@ -204,6 +214,7 @@ class PolygonRenderer:
             self.draw_shape(color, zoom, po_x, po_y)
             self._data_pos = saved_pos
 
+    @native
     def _fill_polygon(self, color, zoom, cx, cy):
         """Read vertices and fill the polygon using scanline algorithm."""
         z64 = zoom
