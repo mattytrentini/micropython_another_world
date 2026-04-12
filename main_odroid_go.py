@@ -16,6 +16,10 @@ import gc
 def main():
     gc.collect()
 
+    # Run at max CPU speed (240MHz vs default 160MHz)
+    import machine
+    machine.freq(240_000_000)
+
     # Mount SD card first (before display init, they share SPI)
     from hal_odroid_go.sdcard import mount_sd
     if not mount_sd():
