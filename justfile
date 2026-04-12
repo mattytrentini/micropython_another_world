@@ -30,6 +30,20 @@ deploy target_port=port:
     echo "Copying main_odroid_go.py -> main.py..."
     $MPY cp main_odroid_go.py :main.py
 
+    # Clean up .py files when .mpy exists (MicroPython loads .py over .mpy)
+    echo "Cleaning stale .py files..."
+    $MPY exec "
+import os
+for d in ['/aw', '/hal_odroid_go']:
+    try:
+        files = os.listdir(d)
+    except:
+        continue
+    for f in files:
+        if f.endswith('.py') and f[:-3] + '.mpy' in files:
+            os.remove(d + '/' + f)
+"
+
     echo "Done! Game data must be on SD card at /game/DAT/"
     echo "Reset the device or run 'just run' to start."
 

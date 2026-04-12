@@ -110,98 +110,81 @@ try:
     def _viper_fill_scanlines_n(buf: ptr8, interp: ptr32,
                                  px: ptr32, py: ptr32, num_points: int,
                                  x1: int, y1: int, color: int):
-        """Viper: edge-step + solid fill for entire polygon. No Python calls."""
-        colb = ((color & 0x0F) << 4) | (color & 0x0F)
+        """Viper: edge-step + solid fill for entire polygon. No Python calls.
+        All arithmetic stays as viper int (32-bit signed on ESP32)."""
+        colb = int(((color & 0x0F) << 4) | (color & 0x0F))
         i = int(0)
-        j = num_points - 1
-        lx = int(px[j]) + x1
-        rx = int(px[i]) + x1
-        i = 1
-        j -= 1
-        cpt1 = int(lx << 16) & 0xFFFFFFFF
-        cpt2 = int(rx << 16) & 0xFFFFFFFF
-        hline_y = y1
-        remaining = num_points
+        j = int(num_points - 1)
+        lx = int(int(px[j]) + x1)
+        rx = int(int(px[i]) + x1)
+        i = int(1)
+        j = int(j - 1)
+        # Use upper 16 bits as integer, lower 16 as fraction
+        # Shift by multiplying to stay in viper int range
+        cpt1 = int(lx * 65536)
+        cpt2 = int(rx * 65536)
+        hline_y = int(y1)
+        remaining = int(num_points)
 
         while True:
-            remaining -= 2
+            remaining = int(remaining - 2)
             if remaining == 0:
                 break
 
-            # calcStep left
-            dy1 = int(py[j]) - int(py[j + 1])
-            if dy1 >= 0 and dy1 < 0x400:
-                step1 = ((int(px[j]) - int(px[j + 1])) * int(interp[dy1]) * 4)
-                # to_i32
-                step1 = step1 & 0xFFFFFFFF
-                if step1 >= 0x80000000:
-                    step1 = step1 - 0x100000000
-            else:
-                step1 = int(0)
+            dy1 = int(int(py[j]) - int(py[j + 1]))
+            step1 = int(0)
+            if dy1 >= 0 and dy1 < 1024:
+                step1 = int((int(px[j]) - int(px[j + 1])) * int(interp[dy1]) * 4)
 
-            # calcStep right
-            dy2 = int(py[i]) - int(py[i - 1])
-            if dy2 >= 0 and dy2 < 0x400:
-                step2 = ((int(px[i]) - int(px[i - 1])) * int(interp[dy2]) * 4)
-                step2 = step2 & 0xFFFFFFFF
-                if step2 >= 0x80000000:
-                    step2 = step2 - 0x100000000
+            dy2 = int(int(py[i]) - int(py[i - 1]))
+            step2 = int(0)
+            if dy2 >= 0 and dy2 < 1024:
+                step2 = int((int(px[i]) - int(px[i - 1])) * int(interp[dy2]) * 4)
             else:
-                step2 = int(0)
                 dy2 = int(0)
 
-            i += 1
-            j -= 1
+            i = int(i + 1)
+            j = int(j - 1)
 
-            cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF
-            cpt2 = (cpt2 & 0xFFFF0000) | 0x8000
-            h = dy2
+            cpt1 = int(int(cpt1 >> 16) << 16) | int(0x7FFF)
+            cpt2 = int(int(cpt2 >> 16) << 16) | int(0x8000)
+            h = int(dy2)
 
             if h == 0:
-                cpt1 = (cpt1 + step1) & 0xFFFFFFFF
-                cpt2 = (cpt2 + step2) & 0xFFFFFFFF
+                cpt1 = int(cpt1 + step1)
+                cpt2 = int(cpt2 + step2)
             else:
                 for _ in range(h):
                     if hline_y >= 0:
-                        # to_i32 >> 16
-                        lxi = cpt1 & 0xFFFFFFFF
-                        if lxi >= 0x80000000:
-                            lxi = (lxi - 0x100000000) >> 16
-                        else:
-                            lxi = lxi >> 16
-                        rxi = cpt2 & 0xFFFFFFFF
-                        if rxi >= 0x80000000:
-                            rxi = (rxi - 0x100000000) >> 16
-                        else:
-                            rxi = rxi >> 16
+                        lxi = int(cpt1 >> 16)
+                        rxi = int(cpt2 >> 16)
 
                         if lxi <= 319 and rxi >= 0:
-                            xmin = lxi if lxi > 0 else 0
-                            xmax = rxi if rxi < 319 else 319
+                            xmin = int(lxi if lxi > 0 else 0)
+                            xmax = int(rxi if rxi < 319 else 319)
 
-                            # Inline solid fill
-                            p = hline_y * 160 + (xmin >> 1)
-                            w = (xmax >> 1) - (xmin >> 1) + 1
+                            p = int(hline_y * 160 + (xmin >> 1))
+                            w = int((xmax >> 1) - (xmin >> 1) + 1)
                             cms = int(0)
                             cme = int(0)
                             if xmin & 1:
-                                w -= 1
-                                cms = 0xF0
+                                w = int(w - 1)
+                                cms = int(0xF0)
                             if not (xmax & 1):
-                                w -= 1
-                                cme = 0x0F
+                                w = int(w - 1)
+                                cme = int(0x0F)
                             if cms:
-                                buf[p] = (int(buf[p]) & cms) | (colb & 0x0F)
-                                p += 1
+                                buf[p] = int(buf[p]) & cms | (colb & 0x0F)
+                                p = int(p + 1)
                             for _ in range(w):
                                 buf[p] = colb
-                                p += 1
+                                p = int(p + 1)
                             if cme:
-                                buf[p] = (int(buf[p]) & cme) | (colb & 0xF0)
+                                buf[p] = int(buf[p]) & cme | (colb & 0xF0)
 
-                    cpt1 = (cpt1 + step1) & 0xFFFFFFFF
-                    cpt2 = (cpt2 + step2) & 0xFFFFFFFF
-                    hline_y += 1
+                    cpt1 = int(cpt1 + step1)
+                    cpt2 = int(cpt2 + step2)
+                    hline_y = int(hline_y + 1)
                     if hline_y > 199:
                         return
 
