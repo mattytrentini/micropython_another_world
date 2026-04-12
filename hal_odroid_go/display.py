@@ -86,7 +86,7 @@ class OdroidGoDisplay(DisplayHAL):
         self._cmd(_CMD_COLMOD, bytes([0x55]))
 
         # Memory access control: landscape, BGR panel
-        self._cmd(_CMD_MADCTL, bytes([_MADCTL_MY | _MADCTL_MV | _MADCTL_BGR]))
+        self._cmd(_CMD_MADCTL, bytes([_MADCTL_MX | _MADCTL_MY | _MADCTL_MV | _MADCTL_BGR]))
 
         self._cmd(_CMD_DISPON)
         time.sleep_ms(100)
