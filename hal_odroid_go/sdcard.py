@@ -1,13 +1,14 @@
 """SD card mount utility for ODROID Go.
 
 Uses the pure Python sdcard.py driver (install via: mpremote mip install sdcard).
-The SD card shares the VSPI bus with the display.
+The SD card shares the VSPI bus with the display via spi_bus module.
 """
 
-from machine import Pin, SPI
+from machine import Pin
 import os
 
-from .consts import SPI_ID, PIN_SCLK, PIN_MOSI, PIN_MISO, PIN_CS_SD
+from .consts import PIN_CS_SD
+from . import spi_bus
 
 
 def mount_sd(mountpoint="/sd"):
@@ -19,15 +20,14 @@ def mount_sd(mountpoint="/sd"):
         import sdcard
         import time
 
-        spi = SPI(SPI_ID, baudrate=100000, polarity=0, phase=0,
-                  sck=Pin(PIN_SCLK), mosi=Pin(PIN_MOSI), miso=Pin(PIN_MISO))
+        spi = spi_bus.get_spi()
         cs = Pin(PIN_CS_SD, Pin.OUT, value=1)
         time.sleep_ms(250)
 
         sd = sdcard.SDCard(spi, cs)
 
-        # Speed up after init
-        spi.init(baudrate=4000000)
+        # Speed up for mount
+        spi_bus.set_sd_speed()
 
         os.mount(sd, mountpoint)
         return True

@@ -11,11 +11,12 @@ loop uses @micropython.viper for near-C speed.
 
 import micropython
 
-from machine import Pin, SPI
+from machine import Pin
 import struct
 
 from aw.hal import DisplayHAL
 from aw.consts import SCREEN_W, SCREEN_H
+from . import spi_bus
 from .consts import (
     SPI_ID, SPI_BAUD, PIN_MOSI, PIN_MISO, PIN_SCLK,
     PIN_DC, PIN_CS_LCD, PIN_BACKLIGHT, DISPLAY_W, DISPLAY_H,
@@ -57,9 +58,9 @@ class OdroidGoDisplay(DisplayHAL):
         self._frame_buf = bytearray(DISPLAY_W * DISPLAY_H * 2)
 
     def init(self, width, height):
-        # Reconfigure SPI for display (may have been set to low speed by SD card)
-        self._spi = SPI(SPI_ID, baudrate=40_000_000, polarity=0, phase=0,
-                        sck=Pin(PIN_SCLK), mosi=Pin(PIN_MOSI), miso=Pin(PIN_MISO))
+        # Use shared SPI bus, switch to display speed
+        self._spi = spi_bus.get_spi()
+        spi_bus.set_display_speed()
         self._dc = Pin(PIN_DC, Pin.OUT)
         self._cs = Pin(PIN_CS_LCD, Pin.OUT, value=1)
 
