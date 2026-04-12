@@ -21,10 +21,10 @@ deploy target_port=port:
 
     # Copy directories (mpytool handles recursive copy)
     echo "Copying aw/..."
-    $MPY cp aw/ :aw/
+    $MPY cp -m aw/ :aw/
 
     echo "Copying hal_odroid_go/..."
-    $MPY cp hal_odroid_go/ :hal_odroid_go/
+    $MPY cp -m hal_odroid_go/ :hal_odroid_go/
 
     # Entry point — installed as main.py so it runs on boot
     echo "Copying main_odroid_go.py -> main.py..."

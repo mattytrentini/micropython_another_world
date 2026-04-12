@@ -190,23 +190,91 @@ class VM:
     def _execute(self):
         """Execute bytecode for the current thread until paused.
 
-        Uses self._code throughout (not a local cache) so that all
-        fetch operations see the same code buffer. The code buffer
-        is only updated between threads in run_tasks(), never mid-thread.
+        The most common opcodes are inlined to avoid method call overhead.
+        Each self.xxx lookup in MicroPython is a dict search, so locals
+        are used for hot data.
         """
+        code = self._code
+        regs = self.regs
+        optable = self._optable
+        draw_simple = self._draw_poly_simple
+        draw_complex = self._draw_poly_complex
+        pc = self._pc
+
         while not self._paused:
-            op = self._code[self._pc]
-            self._pc += 1
+            op = code[pc]
+            pc += 1
 
             if op & 0x80:
-                self._draw_poly_simple(op)
+                self._pc = pc
+                draw_simple(op)
+                pc = self._pc
             elif op & 0x40:
-                self._draw_poly_complex(op)
+                self._pc = pc
+                draw_complex(op)
+                pc = self._pc
+            elif op == 0x00:
+                # movConst: var = val (inlined)
+                var = code[pc]
+                val = (code[pc + 1] << 8) | code[pc + 2]
+                pc += 3
+                regs[var] = val - 0x10000 if val >= 0x8000 else val
+            elif op == 0x01:
+                # mov: dst = src (inlined)
+                regs[code[pc]] = regs[code[pc + 1]]
+                pc += 2
+            elif op == 0x02:
+                # add: dst += src (inlined)
+                d = code[pc]; s = code[pc + 1]; pc += 2
+                v = (regs[d] + regs[s]) & 0xFFFF
+                regs[d] = v - 0x10000 if v >= 0x8000 else v
+            elif op == 0x03:
+                # addConst: var += val (inlined)
+                var = code[pc]
+                val = (code[pc + 1] << 8) | code[pc + 2]
+                pc += 3
+                val = val - 0x10000 if val >= 0x8000 else val
+                v = (regs[var] + val) & 0xFFFF
+                regs[var] = v - 0x10000 if v >= 0x8000 else v
+            elif op == 0x06:
+                # yieldTask (inlined)
+                self._paused = True
+            elif op == 0x07:
+                # jmp (inlined)
+                pc = (code[pc] << 8) | code[pc + 1]
+            elif op == 0x0A:
+                # condJmp (inlined — most complex but very frequent)
+                cond = code[pc]; var = code[pc + 1]; pc += 2
+                b = regs[var]
+                if cond & 0x80:
+                    a = regs[code[pc]]; pc += 1
+                elif cond & 0x40:
+                    a = (code[pc] << 8) | code[pc + 1]; pc += 2
+                    a = a - 0x10000 if a >= 0x8000 else a
+                else:
+                    a = code[pc]; pc += 1
+                c = cond & 7
+                if c == 0:   take = (b == a)
+                elif c == 1: take = (b != a)
+                elif c == 2: take = (b > a)
+                elif c == 3: take = (b >= a)
+                elif c == 4: take = (b < a)
+                elif c == 5: take = (b <= a)
+                else: take = False
+                if take:
+                    pc = (code[pc] << 8) | code[pc + 1]
+                else:
+                    pc += 2
             elif op <= 0x1A:
-                self._optable[op]()
+                self._pc = pc
+                optable[op]()
+                pc = self._pc
             else:
+                self._pc = pc
                 raise RuntimeError("bad opcode 0x{:02X} at pc={}".format(
-                    op, self._pc - 1))
+                    op, pc - 1))
+
+        self._pc = pc
 
     # --- Fetch helpers (inlined for speed where possible) ---
 

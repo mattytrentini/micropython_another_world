@@ -20,6 +20,8 @@ except ImportError:
     def native(f):
         return f
 
+import array
+
 # Row stride in bytes
 STRIDE = SCREEN_W // 2  # 160
 
@@ -104,13 +106,118 @@ try:
         if cmaske:
             buf[p] = (int(buf[p]) & cmaske) | 0x80
 
+    @micropython.viper
+    def _viper_fill_scanlines_n(buf: ptr8, interp: ptr32,
+                                 px: ptr32, py: ptr32, num_points: int,
+                                 x1: int, y1: int, color: int):
+        """Viper: edge-step + solid fill for entire polygon. No Python calls."""
+        colb = ((color & 0x0F) << 4) | (color & 0x0F)
+        i = int(0)
+        j = num_points - 1
+        lx = int(px[j]) + x1
+        rx = int(px[i]) + x1
+        i = 1
+        j -= 1
+        cpt1 = int(lx << 16) & 0xFFFFFFFF
+        cpt2 = int(rx << 16) & 0xFFFFFFFF
+        hline_y = y1
+        remaining = num_points
+
+        while True:
+            remaining -= 2
+            if remaining == 0:
+                break
+
+            # calcStep left
+            dy1 = int(py[j]) - int(py[j + 1])
+            if dy1 >= 0 and dy1 < 0x400:
+                step1 = ((int(px[j]) - int(px[j + 1])) * int(interp[dy1]) * 4)
+                # to_i32
+                step1 = step1 & 0xFFFFFFFF
+                if step1 >= 0x80000000:
+                    step1 = step1 - 0x100000000
+            else:
+                step1 = int(0)
+
+            # calcStep right
+            dy2 = int(py[i]) - int(py[i - 1])
+            if dy2 >= 0 and dy2 < 0x400:
+                step2 = ((int(px[i]) - int(px[i - 1])) * int(interp[dy2]) * 4)
+                step2 = step2 & 0xFFFFFFFF
+                if step2 >= 0x80000000:
+                    step2 = step2 - 0x100000000
+            else:
+                step2 = int(0)
+                dy2 = int(0)
+
+            i += 1
+            j -= 1
+
+            cpt1 = (cpt1 & 0xFFFF0000) | 0x7FFF
+            cpt2 = (cpt2 & 0xFFFF0000) | 0x8000
+            h = dy2
+
+            if h == 0:
+                cpt1 = (cpt1 + step1) & 0xFFFFFFFF
+                cpt2 = (cpt2 + step2) & 0xFFFFFFFF
+            else:
+                for _ in range(h):
+                    if hline_y >= 0:
+                        # to_i32 >> 16
+                        lxi = cpt1 & 0xFFFFFFFF
+                        if lxi >= 0x80000000:
+                            lxi = (lxi - 0x100000000) >> 16
+                        else:
+                            lxi = lxi >> 16
+                        rxi = cpt2 & 0xFFFFFFFF
+                        if rxi >= 0x80000000:
+                            rxi = (rxi - 0x100000000) >> 16
+                        else:
+                            rxi = rxi >> 16
+
+                        if lxi <= 319 and rxi >= 0:
+                            xmin = lxi if lxi > 0 else 0
+                            xmax = rxi if rxi < 319 else 319
+
+                            # Inline solid fill
+                            p = hline_y * 160 + (xmin >> 1)
+                            w = (xmax >> 1) - (xmin >> 1) + 1
+                            cms = int(0)
+                            cme = int(0)
+                            if xmin & 1:
+                                w -= 1
+                                cms = 0xF0
+                            if not (xmax & 1):
+                                w -= 1
+                                cme = 0x0F
+                            if cms:
+                                buf[p] = (int(buf[p]) & cms) | (colb & 0x0F)
+                                p += 1
+                            for _ in range(w):
+                                buf[p] = colb
+                                p += 1
+                            if cme:
+                                buf[p] = (int(buf[p]) & cme) | (colb & 0xF0)
+
+                    cpt1 = (cpt1 + step1) & 0xFFFFFFFF
+                    cpt2 = (cpt2 + step2) & 0xFFFFFFFF
+                    hline_y += 1
+                    if hline_y > 199:
+                        return
+
     _HAS_VIPER = True
 except Exception:
     _HAS_VIPER = False
 
 # Division lookup table for edge stepping (calcStep).
 # _interp_table[i] = 0x4000 // i for i > 0, 0x4000 for i == 0
-_interp_table = [0x4000] + [0x4000 // i for i in range(1, 0x400)]
+# Stored as array('i') for viper ptr32 compatibility
+_interp_table_list = [0x4000] + [0x4000 // i for i in range(1, 0x400)]
+_interp_table = _interp_table_list  # used by Python fallback
+try:
+    _interp_table_arr = array.array('i', _interp_table_list)
+except Exception:
+    _interp_table_arr = None
 
 # Max vertices per polygon
 MAX_POINTS = 50
@@ -139,8 +246,9 @@ class PolygonRenderer:
         self._data_pos = 0      # current read position
         self._data_buf = None   # base of current data segment (for offset lookups)
         # Pre-allocated vertex arrays to avoid allocations
-        self._px = [0] * MAX_POINTS
-        self._py = [0] * MAX_POINTS
+        # Typed arrays for viper compatibility (ptr32)
+        self._px = array.array('i', (0 for _ in range(MAX_POINTS)))
+        self._py = array.array('i', (0 for _ in range(MAX_POINTS)))
 
     def set_data(self, data, offset):
         """Set the shape data buffer and starting offset.
@@ -244,6 +352,13 @@ class PolygonRenderer:
         if x1 > 319 or x2 < 0 or y1 > 199 or y2 < 0:
             return
 
+        # For solid color fills, use the all-in-one viper function
+        if _HAS_VIPER and color < 0x10 and _interp_table_arr is not None:
+            draw_buf = self.video.get_draw_buf()
+            _viper_fill_scanlines_n(draw_buf, _interp_table_arr,
+                                     px, py, num_points, x1, y1, color)
+            return
+
         # Select draw function based on color
         if color < 0x10:
             draw_fn = self._draw_line_n
@@ -253,7 +368,6 @@ class PolygonRenderer:
             draw_fn = self._draw_line_blend
 
         # Scanline fill: walk left and right edges simultaneously
-        # Left edge: vertices from end backwards (j), right edge: vertices from start forwards (i)
         hline_y = y1
 
         i = 0
