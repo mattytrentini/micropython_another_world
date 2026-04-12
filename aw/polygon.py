@@ -107,6 +107,109 @@ try:
             buf[p] = (int(buf[p]) & cmaske) | 0x80
 
     @micropython.viper
+    def _viper_read_and_fill_n(buf: ptr8, data: ptr8, data_pos: int,
+                                interp: ptr32, px: ptr32, py: ptr32,
+                                cx: int, cy: int, zoom: int, color: int) -> int:
+        """Viper: read vertices + edge-step + fill. Returns new data_pos.
+        Replaces _fill_polygon for solid color, eliminating all Python calls."""
+        z64 = int(zoom)
+        bbw = int(int(data[data_pos]) * z64 // 64)
+        bbh = int(int(data[data_pos + 1]) * z64 // 64)
+        num_points = int(data[data_pos + 2])
+        dp = int(data_pos + 3)
+
+        # Read vertices
+        for i in range(num_points):
+            px[i] = int(data[dp]) * z64 // 64
+            py[i] = int(data[dp + 1]) * z64 // 64
+            dp = int(dp + 2)
+
+        # Degenerate point
+        if num_points == 4 and bbw == 0 and bbh <= 1:
+            if cx >= 0 and cx <= 319 and cy >= 0 and cy <= 199:
+                colb = int(((color & 0x0F) << 4) | (color & 0x0F))
+                off = int(cy * 160 + (cx >> 1))
+                if cx & 1:
+                    buf[off] = (int(buf[off]) & 0xF0) | (color & 0x0F)
+                else:
+                    buf[off] = (int(buf[off]) & 0x0F) | ((color & 0x0F) << 4)
+            return dp
+
+        x1 = int(cx - bbw // 2)
+        y1 = int(cy - bbh // 2)
+
+        if x1 > 319 or int(cx + bbw // 2) < 0 or y1 > 199 or int(cy + bbh // 2) < 0:
+            return dp
+
+        # Edge stepping + solid fill (inlined from _viper_fill_scanlines_n)
+        colb = int(((color & 0x0F) << 4) | (color & 0x0F))
+        i = int(0)
+        j = int(num_points - 1)
+        lx = int(int(px[j]) + x1)
+        rx = int(int(px[i]) + x1)
+        i = int(1)
+        j = int(j - 1)
+        cpt1 = int(lx * 65536)
+        cpt2 = int(rx * 65536)
+        hline_y = int(y1)
+        remaining = int(num_points)
+
+        while True:
+            remaining = int(remaining - 2)
+            if remaining == 0:
+                break
+            dy1 = int(int(py[j]) - int(py[j + 1]))
+            step1 = int(0)
+            if dy1 >= 0 and dy1 < 1024:
+                step1 = int((int(px[j]) - int(px[j + 1])) * int(interp[dy1]) * 4)
+            dy2 = int(int(py[i]) - int(py[i - 1]))
+            step2 = int(0)
+            if dy2 >= 0 and dy2 < 1024:
+                step2 = int((int(px[i]) - int(px[i - 1])) * int(interp[dy2]) * 4)
+            else:
+                dy2 = int(0)
+            i = int(i + 1)
+            j = int(j - 1)
+            cpt1 = int(int(cpt1 >> 16) << 16) | int(0x7FFF)
+            cpt2 = int(int(cpt2 >> 16) << 16) | int(0x8000)
+            h = int(dy2)
+            if h == 0:
+                cpt1 = int(cpt1 + step1)
+                cpt2 = int(cpt2 + step2)
+            else:
+                for _ in range(h):
+                    if hline_y >= 0:
+                        lxi = int(cpt1 >> 16)
+                        rxi = int(cpt2 >> 16)
+                        if lxi <= 319 and rxi >= 0:
+                            xmin = int(lxi if lxi > 0 else 0)
+                            xmax = int(rxi if rxi < 319 else 319)
+                            p = int(hline_y * 160 + (xmin >> 1))
+                            w = int((xmax >> 1) - (xmin >> 1) + 1)
+                            cms = int(0)
+                            cme = int(0)
+                            if xmin & 1:
+                                w = int(w - 1)
+                                cms = int(0xF0)
+                            if not (xmax & 1):
+                                w = int(w - 1)
+                                cme = int(0x0F)
+                            if cms:
+                                buf[p] = int(buf[p]) & cms | (colb & 0x0F)
+                                p = int(p + 1)
+                            for _ in range(w):
+                                buf[p] = colb
+                                p = int(p + 1)
+                            if cme:
+                                buf[p] = int(buf[p]) & cme | (colb & 0xF0)
+                    cpt1 = int(cpt1 + step1)
+                    cpt2 = int(cpt2 + step2)
+                    hline_y = int(hline_y + 1)
+                    if hline_y > 199:
+                        return dp
+        return dp
+
+    @micropython.viper
     def _viper_fill_scanlines_n(buf: ptr8, interp: ptr32,
                                  px: ptr32, py: ptr32, num_points: int,
                                  x1: int, y1: int, color: int):
@@ -308,6 +411,16 @@ class PolygonRenderer:
     @native
     def _fill_polygon(self, color, zoom, cx, cy):
         """Read vertices and fill the polygon using scanline algorithm."""
+        # For solid color fills, use the all-in-one viper function
+        # that reads vertices AND fills — no Python method calls at all
+        if _HAS_VIPER and color < 0x10 and _interp_table_arr is not None:
+            draw_buf = self.video.get_draw_buf()
+            self._data_pos = _viper_read_and_fill_n(
+                draw_buf, self._data_buf, self._data_pos,
+                _interp_table_arr, self._px, self._py,
+                cx, cy, zoom, color)
+            return
+
         z64 = zoom
 
         bbw = self._fetch_byte() * z64 // 64
@@ -333,13 +446,6 @@ class PolygonRenderer:
 
         # Bounds check
         if x1 > 319 or x2 < 0 or y1 > 199 or y2 < 0:
-            return
-
-        # For solid color fills, use the all-in-one viper function
-        if _HAS_VIPER and color < 0x10 and _interp_table_arr is not None:
-            draw_buf = self.video.get_draw_buf()
-            _viper_fill_scanlines_n(draw_buf, _interp_table_arr,
-                                     px, py, num_points, x1, y1, color)
             return
 
         # Select draw function based on color
