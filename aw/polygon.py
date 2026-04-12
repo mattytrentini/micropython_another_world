@@ -335,12 +335,17 @@ class PolygonRenderer:
         # Typed arrays for viper compatibility (ptr32)
         self._px = array.array('i', (0 for _ in range(MAX_POINTS)))
         self._py = array.array('i', (0 for _ in range(MAX_POINTS)))
-        # Try to load the viper fast-fill from separate module
+        # Try to load viper fast-fills from separate module
+        self._fast_fill_n = None
+        self._fast_fill_p = None
+        self._fast_fill_blend = None
         try:
-            from .poly_viper import read_and_fill_n
-            self._fast_fill = read_and_fill_n
+            from .poly_viper import read_and_fill_n, read_and_fill_p, read_and_fill_blend
+            self._fast_fill_n = read_and_fill_n
+            self._fast_fill_p = read_and_fill_p
+            self._fast_fill_blend = read_and_fill_blend
         except ImportError:
-            self._fast_fill = None
+            pass
 
     def set_data(self, data, offset):
         """Set the shape data buffer and starting offset.
@@ -417,13 +422,26 @@ class PolygonRenderer:
     @native
     def _fill_polygon(self, color, zoom, cx, cy):
         """Read vertices and fill the polygon using scanline algorithm."""
-        # For solid color fills, use the all-in-one viper function
-        # that reads vertices AND fills — no Python method calls at all
-        if color < 0x10 and self._fast_fill is not None:
+        # Use viper fast-fill for all three draw modes
+        if color < 0x10 and self._fast_fill_n is not None:
             draw_buf = self.video.get_draw_buf()
-            self._data_pos = self._fast_fill(
+            self._data_pos = self._fast_fill_n(
                 draw_buf, self._data_buf, self._data_pos,
                 self._px, self._py, cx, cy, zoom, color)
+            return
+        if color > 0x10 and self._fast_fill_p is not None:
+            draw_buf = self.video.get_draw_buf()
+            page0 = self.video.page_bufs[0]
+            if draw_buf is not page0:
+                self._data_pos = self._fast_fill_p(
+                    draw_buf, page0, self._data_buf, self._data_pos,
+                    self._px, self._py, cx, cy, zoom)
+                return
+        if color == 0x10 and self._fast_fill_blend is not None:
+            draw_buf = self.video.get_draw_buf()
+            self._data_pos = self._fast_fill_blend(
+                draw_buf, self._data_buf, self._data_pos,
+                self._px, self._py, cx, cy, zoom)
             return
 
         z64 = zoom
