@@ -44,7 +44,7 @@ for d in ['/aw', '/hal_odroid_go']:
             os.remove(d + '/' + f)
 "
 
-    echo "Done! Game data must be on SD card at /game/DAT/"
+    echo "Done. Game data must be on SD card at /game/DAT/"
     echo "Reset the device or run 'just run' to start."
 
 # Open a REPL on the device
