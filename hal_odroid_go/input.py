@@ -1,7 +1,9 @@
-"""ODROID Go input HAL — digital buttons + analog d-pad.
+"""ODROID Go input HAL — digital buttons + resistor-ladder d-pad.
 
-Reads hardware GPIO state directly — true held-key detection with
-no terminal repeat hacks needed. Supports simultaneous button presses.
+D-pad uses a resistor ladder on two ADC pins:
+  Rest=0, LEFT/UP=4095, RIGHT/DOWN=~1850
+
+Buttons are active LOW (0 = pressed).
 """
 
 from machine import Pin, ADC
@@ -9,9 +11,9 @@ from machine import Pin, ADC
 from aw.hal import InputHAL, InputState
 from .consts import (
     PIN_BTN_A, PIN_BTN_B, PIN_BTN_MENU, PIN_BTN_SELECT,
-    PIN_BTN_START, PIN_BTN_VOLUME,
+    PIN_BTN_START,
     PIN_JOY_X, PIN_JOY_Y,
-    JOY_THRESH_LOW, JOY_THRESH_HIGH,
+    JOY_THRESH_MID_LOW, JOY_THRESH_MID_HIGH,
 )
 
 
@@ -25,9 +27,8 @@ class OdroidGoInput(InputHAL):
         self._btn_menu = Pin(PIN_BTN_MENU, Pin.IN, Pin.PULL_UP)
         self._btn_select = Pin(PIN_BTN_SELECT, Pin.IN, Pin.PULL_UP)
         self._btn_start = Pin(PIN_BTN_START, Pin.IN)  # external pull-up
-        self._btn_volume = Pin(PIN_BTN_VOLUME, Pin.IN)  # external pull-up
 
-        # Analog d-pad
+        # D-pad ADC (resistor ladder)
         self._joy_x = ADC(Pin(PIN_JOY_X))
         self._joy_x.atten(ADC.ATTN_11DB)
         self._joy_y = ADC(Pin(PIN_JOY_Y))
@@ -40,18 +41,18 @@ class OdroidGoInput(InputHAL):
     def poll(self):
         state = InputState()
 
-        # D-pad (analog — read ADC values)
+        # D-pad (resistor ladder: rest=0, left/up=4095, right/down=~1850)
         x = self._joy_x.read()
         y = self._joy_y.read()
-        state.left = x > JOY_THRESH_HIGH
-        state.right = x < JOY_THRESH_LOW
-        state.up = y > JOY_THRESH_HIGH
-        state.down = y < JOY_THRESH_LOW
+        state.left = x > JOY_THRESH_MID_HIGH
+        state.right = x > JOY_THRESH_MID_LOW and x <= JOY_THRESH_MID_HIGH
+        state.up = y > JOY_THRESH_MID_HIGH
+        state.down = y > JOY_THRESH_MID_LOW and y <= JOY_THRESH_MID_HIGH
 
         # Action = A button (active LOW: 0 = pressed)
         state.action = self._btn_a.value() == 0
 
-        # B button as secondary action (also maps to action)
+        # B button as secondary action
         if self._btn_b.value() == 0:
             state.action = True
 

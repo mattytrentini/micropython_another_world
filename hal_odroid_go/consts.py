@@ -23,11 +23,12 @@ PIN_BTN_SELECT = 27
 PIN_BTN_START = 39   # input-only pin, external pull-up
 PIN_BTN_VOLUME = 0   # external pull-up
 
-# D-pad analog (ADC, 12-bit 0-4095)
+# D-pad analog (ADC, 12-bit 0-4095, resistor ladder)
+# Rest=0, LEFT/UP=4095, RIGHT/DOWN=~1850
 PIN_JOY_X = 34
 PIN_JOY_Y = 35
-JOY_THRESH_LOW = 1024    # below = right (X) or down (Y)
-JOY_THRESH_HIGH = 3072   # above = left (X) or up (Y)
+JOY_THRESH_MID_LOW = 800    # above = right (X) or down (Y)
+JOY_THRESH_MID_HIGH = 2500  # above = left (X) or up (Y)
 
 # Speaker
 PIN_SPEAKER = 26
