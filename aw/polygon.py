@@ -335,6 +335,12 @@ class PolygonRenderer:
         # Typed arrays for viper compatibility (ptr32)
         self._px = array.array('i', (0 for _ in range(MAX_POINTS)))
         self._py = array.array('i', (0 for _ in range(MAX_POINTS)))
+        # Try to load the viper fast-fill from separate module
+        try:
+            from .poly_viper import read_and_fill_n
+            self._fast_fill = read_and_fill_n
+        except ImportError:
+            self._fast_fill = None
 
     def set_data(self, data, offset):
         """Set the shape data buffer and starting offset.
@@ -413,12 +419,11 @@ class PolygonRenderer:
         """Read vertices and fill the polygon using scanline algorithm."""
         # For solid color fills, use the all-in-one viper function
         # that reads vertices AND fills — no Python method calls at all
-        if _HAS_VIPER and color < 0x10 and _interp_table_arr is not None:
+        if color < 0x10 and self._fast_fill is not None:
             draw_buf = self.video.get_draw_buf()
-            self._data_pos = _viper_read_and_fill_n(
+            self._data_pos = self._fast_fill(
                 draw_buf, self._data_buf, self._data_pos,
-                _interp_table_arr, self._px, self._py,
-                cx, cy, zoom, color)
+                self._px, self._py, cx, cy, zoom, color)
             return
 
         z64 = zoom
