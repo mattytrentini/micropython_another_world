@@ -51,15 +51,14 @@ class OdroidGoDisplay(DisplayHAL):
         self._dc = None
         self._cs = None
         # Pre-built RGB565 LUT: 256 entries × 4 bytes (2 pixels × 2 bytes)
-        # For each possible 4bpp packed byte value, store 2 RGB565 pixels
         self._lut = bytearray(256 * 4)
-        # Row buffer for one scanline of RGB565 data (320 pixels × 2 bytes)
-        self._row_buf = bytearray(SCREEN_W * 2)
-        # Black row for top/bottom borders
-        self._black_row = bytearray(SCREEN_W * 2)
+        # Full frame buffer for RGB565 (320*240*2 = 153,600 bytes)
+        # One large SPI write is much faster than 240 small ones
+        self._frame_buf = bytearray(DISPLAY_W * DISPLAY_H * 2)
 
     def init(self, width, height):
-        self._spi = SPI(SPI_ID, baudrate=SPI_BAUD, polarity=0, phase=0,
+        # Reconfigure SPI for display (may have been set to low speed by SD card)
+        self._spi = SPI(SPI_ID, baudrate=40_000_000, polarity=0, phase=0,
                         sck=Pin(PIN_SCLK), mosi=Pin(PIN_MOSI), miso=Pin(PIN_MISO))
         self._dc = Pin(PIN_DC, Pin.OUT)
         self._cs = Pin(PIN_CS_LCD, Pin.OUT, value=1)
@@ -146,55 +145,49 @@ class OdroidGoDisplay(DisplayHAL):
 
     @staticmethod
     @micropython.viper
-    def _convert_row(src: ptr8, src_off: int, lut: ptr8, dst: ptr8, count: int):
-        """Convert one row of 4bpp packed pixels to RGB565 via LUT (viper)."""
-        d = 0
-        for x in range(count):
-            off = int(src[src_off + x]) * 4
-            dst[d] = lut[off]
-            dst[d + 1] = lut[off + 1]
-            dst[d + 2] = lut[off + 2]
-            dst[d + 3] = lut[off + 3]
-            d += 4
+    def _convert_frame(src: ptr8, lut: ptr8, dst: ptr8,
+                       src_rows: int, src_stride: int, dst_offset: int):
+        """Convert full 4bpp frame to RGB565 in the frame buffer (viper)."""
+        d = dst_offset
+        for y in range(src_rows):
+            s = y * src_stride
+            for x in range(src_stride):
+                off = int(src[s + x]) * 4
+                dst[d] = lut[off]
+                dst[d + 1] = lut[off + 1]
+                dst[d + 2] = lut[off + 2]
+                dst[d + 3] = lut[off + 3]
+                d += 4
 
     def present(self, framebuf_4bpp):
-        """Convert 4bpp buffer to RGB565 and push to display."""
-        lut = self._lut
-        row_buf = self._row_buf
-        buf = framebuf_4bpp
+        """Convert 4bpp buffer to RGB565 and push to display in one SPI write."""
+        fb = self._frame_buf
 
-        # Set window for the full display
+        # Convert game area into frame buffer (after top border offset)
+        dst_offset = _Y_OFFSET * DISPLAY_W * 2
+        try:
+            self._convert_frame(framebuf_4bpp, self._lut, fb,
+                                SCREEN_H, STRIDE, dst_offset)
+        except Exception:
+            # Viper fallback
+            lut = self._lut
+            buf = framebuf_4bpp
+            d = dst_offset
+            for y in range(SCREEN_H):
+                s = y * STRIDE
+                for x in range(STRIDE):
+                    off = buf[s + x] * 4
+                    fb[d] = lut[off]
+                    fb[d + 1] = lut[off + 1]
+                    fb[d + 2] = lut[off + 2]
+                    fb[d + 3] = lut[off + 3]
+                    d += 4
+
+        # Single SPI write for the entire frame
         self._set_window(0, 0, DISPLAY_W - 1, DISPLAY_H - 1)
         self._dc.value(1)
         self._cs.value(0)
-
-        # Top border (black)
-        for _ in range(_Y_OFFSET):
-            self._spi.write(self._black_row)
-
-        # Game area (320x200)
-        try:
-            for y in range(SCREEN_H):
-                self._convert_row(buf, y * STRIDE, lut, row_buf, STRIDE)
-                self._spi.write(row_buf)
-        except Exception:
-            # Viper not available — fall back to Python loop
-            for y in range(SCREEN_H):
-                src_off = y * STRIDE
-                dst = 0
-                for x in range(STRIDE):
-                    off = buf[src_off + x] * 4
-                    row_buf[dst] = lut[off]
-                    row_buf[dst + 1] = lut[off + 1]
-                    row_buf[dst + 2] = lut[off + 2]
-                    row_buf[dst + 3] = lut[off + 3]
-                    dst += 4
-                self._spi.write(row_buf)
-
-        # Bottom border (black)
-        for _ in range(DISPLAY_H - SCREEN_H - _Y_OFFSET):
-            self._spi.write(self._black_row)
-
+        self._spi.write(fb)
         self._cs.value(1)
 
     def shutdown(self):
