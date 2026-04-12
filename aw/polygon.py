@@ -17,6 +17,91 @@ from .consts import SCREEN_W, SCREEN_H
 # Row stride in bytes
 STRIDE = SCREEN_W // 2  # 160
 
+# Try to use viper-accelerated scanline functions
+try:
+    import micropython
+
+    @micropython.viper
+    def _viper_draw_line_n(buf: ptr8, x1: int, x2: int, y: int, color: int):
+        """Viper-accelerated solid color horizontal span fill."""
+        xmin = x1 if x1 < x2 else x2
+        xmax = x2 if x1 < x2 else x1
+        p = y * 160 + (xmin >> 1)
+        w = (xmax >> 1) - (xmin >> 1) + 1
+        cmasks = int(0)
+        cmaske = int(0)
+        if xmin & 1:
+            w -= 1
+            cmasks = 0xF0
+        if not (xmax & 1):
+            w -= 1
+            cmaske = 0x0F
+        colb = ((color & 0x0F) << 4) | (color & 0x0F)
+        if cmasks:
+            buf[p] = (int(buf[p]) & cmasks) | (colb & 0x0F)
+            p += 1
+        for _ in range(w):
+            buf[p] = colb
+            p += 1
+        if cmaske:
+            buf[p] = (int(buf[p]) & cmaske) | (colb & 0xF0)
+
+    @micropython.viper
+    def _viper_draw_line_p(buf: ptr8, page0: ptr8, x1: int, x2: int, y: int):
+        """Viper-accelerated page copy horizontal span."""
+        xmin = x1 if x1 < x2 else x2
+        xmax = x2 if x1 < x2 else x1
+        off = y * 160 + (xmin >> 1)
+        w = (xmax >> 1) - (xmin >> 1) + 1
+        cmasks = int(0)
+        cmaske = int(0)
+        if xmin & 1:
+            w -= 1
+            cmasks = 0xF0
+        if not (xmax & 1):
+            w -= 1
+            cmaske = 0x0F
+        p = off
+        q = off
+        if cmasks:
+            buf[p] = (int(buf[p]) & cmasks) | (int(page0[q]) & 0x0F)
+            p += 1
+            q += 1
+        for _ in range(w):
+            buf[p] = page0[q]
+            p += 1
+            q += 1
+        if cmaske:
+            buf[p] = (int(buf[p]) & cmaske) | (int(page0[q]) & 0xF0)
+
+    @micropython.viper
+    def _viper_draw_line_blend(buf: ptr8, x1: int, x2: int, y: int):
+        """Viper-accelerated blend mode horizontal span."""
+        xmin = x1 if x1 < x2 else x2
+        xmax = x2 if x1 < x2 else x1
+        p = y * 160 + (xmin >> 1)
+        w = (xmax >> 1) - (xmin >> 1) + 1
+        cmasks = int(0)
+        cmaske = int(0)
+        if xmin & 1:
+            w -= 1
+            cmasks = 0xF7
+        if not (xmax & 1):
+            w -= 1
+            cmaske = 0x7F
+        if cmasks:
+            buf[p] = (int(buf[p]) & cmasks) | 0x08
+            p += 1
+        for _ in range(w):
+            buf[p] = (int(buf[p]) & 0x77) | 0x88
+            p += 1
+        if cmaske:
+            buf[p] = (int(buf[p]) & cmaske) | 0x80
+
+    _HAS_VIPER = True
+except Exception:
+    _HAS_VIPER = False
+
 # Division lookup table for edge stepping (calcStep).
 # _interp_table[i] = 0x4000 // i for i > 0, 0x4000 for i == 0
 _interp_table = [0x4000] + [0x4000 // i for i in range(1, 0x400)]
@@ -260,6 +345,9 @@ class PolygonRenderer:
 
     def _draw_line_n(self, buf, page0, x1, x2, y, color):
         """Solid color horizontal span fill (packed 4bpp)."""
+        if _HAS_VIPER:
+            _viper_draw_line_n(buf, x1, x2, y, color)
+            return
         xmax = max(x1, x2)
         xmin = min(x1, x2)
         p = y * STRIDE + xmin // 2
@@ -288,6 +376,9 @@ class PolygonRenderer:
     def _draw_line_p(self, buf, page0, x1, x2, y, color):
         """Page copy horizontal span (copy from page 0)."""
         if buf is page0:
+            return
+        if _HAS_VIPER:
+            _viper_draw_line_p(buf, page0, x1, x2, y)
             return
         xmax = max(x1, x2)
         xmin = min(x1, x2)
@@ -318,6 +409,9 @@ class PolygonRenderer:
 
     def _draw_line_blend(self, buf, page0, x1, x2, y, color):
         """Blend mode horizontal span (set bit 3 of each nibble)."""
+        if _HAS_VIPER:
+            _viper_draw_line_blend(buf, x1, x2, y)
+            return
         xmax = max(x1, x2)
         xmin = min(x1, x2)
         p = y * STRIDE + xmin // 2
