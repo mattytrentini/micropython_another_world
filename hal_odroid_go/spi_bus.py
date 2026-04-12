@@ -7,8 +7,9 @@ and provides speed switching for SD card access.
 from machine import Pin, SPI
 from .consts import SPI_ID, PIN_SCLK, PIN_MOSI, PIN_MISO
 
-# Display runs at 80MHz, SD card at 4MHz
-DISPLAY_FREQ = 80_000_000
+# Display runs at 40MHz, SD card at 4MHz
+# 80MHz causes tearing on some boards due to signal integrity
+DISPLAY_FREQ = 40_000_000
 SD_FREQ = 4_000_000
 SD_INIT_FREQ = 100_000
 
