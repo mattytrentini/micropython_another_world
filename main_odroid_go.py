@@ -43,6 +43,7 @@ def main():
     engine = Engine(display, inp, timer, file_hal)
 
     try:
+        display.init(320, 200)
         engine.init(start_part=16001)
         engine.run()
     finally:

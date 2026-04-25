@@ -8,10 +8,11 @@ Arguments:
     data_dir:   path to directory containing game data files
     password:   4-letter checkpoint code (e.g. LDKD, HTDC, CLLD)
                 run 'python3 tools/passwords.py' to see all codes
-    part_id:    numeric starting part (default: 16001 = intro)
+    part_id:    numeric starting part (default: show title screen)
     --sdl:      use SDL2 window (proper input, hardware scaling)
     --debug:    enable debug mode (frame counter, pause/step)
     --reg=R:V   set VM register R to value V (hex with 0x prefix)
+    --no-title: skip the title screen (go straight to intro)
 
 Controls:
     Arrow keys or WASD: movement
@@ -33,20 +34,19 @@ def main():
             sys.argv[0]))
         print("\ndata_dir: path to game data files")
         print("password: 4-letter checkpoint code (e.g. LDKD, HTDC, CLLD)")
-        print("part_id:  numeric starting part (default 16001)")
+        print("part_id:  numeric starting part (default: title screen)")
         print("--sdl:   SDL2 window (recommended)")
         print("--debug: frame counter, P to pause, N to step")
         print("\nRun 'python3 tools/passwords.py' to see all checkpoint codes")
         sys.exit(1)
 
     data_dir = args[0]
-    part_id = 16001
+    part_id = None          # None → show title screen
     checkpoint = None
 
     if len(args) > 1:
         arg = args[1]
         if arg.isalpha():
-            # Password lookup
             from aw.consts import PASSWORDS
             pw = arg.upper()
             if pw not in PASSWORDS:
@@ -59,6 +59,7 @@ def main():
 
     use_sdl = "--sdl" in flags
     debug = "--debug" in flags
+    skip_title = "--no-title" in flags
 
     # Parse --reg=0xNN:val to pre-set VM registers
     preset_regs = {}
@@ -94,10 +95,21 @@ def main():
         timer = UnixTimer()
 
     file_hal = UnixFile(data_dir)
-    engine = Engine(display, inp, timer, file_hal)
-    engine.debug = debug
 
     try:
+        display.init(320, 200)
+
+        if part_id is None and not skip_title:
+            from aw.title import TitleScreen
+            result = TitleScreen(display, inp, timer).run()
+            if result is None:
+                return
+            part_id, checkpoint = result
+        elif part_id is None:
+            part_id = 16001  # default intro when title is skipped
+
+        engine = Engine(display, inp, timer, file_hal)
+        engine.debug = debug
         engine.init(start_part=part_id)
         if checkpoint is not None:
             engine.vm.regs[0] = checkpoint
