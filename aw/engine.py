@@ -53,8 +53,11 @@ class Engine:
         self._current_part = 0
 
     def init(self, start_part=PART_INTRO):
-        """Initialize the engine and load the starting game part."""
-        self.display.init(320, 200)
+        """Initialize the engine and load the starting game part.
+
+        The caller is responsible for `display.init(320, 200)` before
+        calling this, and `display.shutdown()` after `run()` returns.
+        """
         self.resource.read_memlist()
         self.resource.setup_part(start_part)
 
@@ -85,8 +88,6 @@ class Engine:
         """Main game loop. Runs until quit."""
         while not self._quit:
             self._frame()
-
-        self.display.shutdown()
 
     def _frame(self):
         """Execute one frame: input, VM tasks, timing."""
